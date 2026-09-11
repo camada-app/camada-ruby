@@ -9,3 +9,4 @@ RSpec.configure do |config|
   config.order = :defined
   config.before(:suite) { Fixtures.check! }
 end
+require_relative "support/fake_analyst"
