@@ -10,3 +10,5 @@ RSpec.configure do |config|
   config.before(:suite) { Fixtures.check! }
 end
 require_relative "support/fake_analyst"
+require_relative "support/challenge_helpers"
+require_relative "support/host"

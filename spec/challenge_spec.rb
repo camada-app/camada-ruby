@@ -1,22 +1,8 @@
 # frozen_string_literal: true
 
-require "digest"
-
 # The SDK-served challenge (contracts §D2): a stateless per-(ip, UTC day) HMAC nonce, a 16-bit
 # SHA-256 proof of work, and an HMAC cookie bound to the ip for one hour. Ported case for case
 # from camada-core/test/challenge.test.ts via camada-python's test_challenge.py.
-module ChallengeHelpers
-  DAY_MS = 86_400_000
-  NOW = 1_800_000_000_000
-  IP = "203.0.113.9"
-
-  def solve(nonce, bits = 16)
-    n = 0
-    n += 1 until Camada::Challenge.pow_ok?(Digest::SHA256.hexdigest("#{nonce}.#{n}"), bits)
-    n.to_s
-  end
-end
-
 RSpec.describe Camada::Challenge do
   include ChallengeHelpers
 
