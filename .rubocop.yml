@@ -1,0 +1,45 @@
+AllCops:
+  TargetRubyVersion: 3.1
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - "vendor/**/*"
+    - "tmp/**/*"
+
+# A 1:1 port of camada-python: the reference's function boundaries are kept so the two can be
+# read side by side, which makes some methods longer than the defaults allow.
+Metrics:
+  Enabled: false
+
+Style/Documentation:
+  Enabled: false
+Style/StringLiterals:
+  EnforcedStyle: double_quotes
+Style/StringLiteralsInInterpolation:
+  EnforcedStyle: double_quotes
+Style/NumericPredicate:
+  Enabled: false
+Style/IfUnlessModifier:
+  Enabled: false
+Style/GuardClause:
+  Enabled: false
+Style/MultipleComparison:
+  Enabled: false
+Naming/MethodParameterName:
+  Enabled: false
+Naming/VariableNumber:
+  Enabled: false
+Naming/PredicateName:
+  Enabled: false
+Layout/LineLength:
+  Max: 140
+  Exclude:
+    - "lib/camada/beacon_js.rb"   # generated: one vendored JS string
+    - "spec/**/*"
+Lint/MissingSuper:
+  Enabled: false
+# Req and RequestInfo carry `method`, the field name the whole SDK family uses for the HTTP verb.
+Lint/StructNewOverride:
+  Enabled: false
+Style/OptionalBooleanParameter:
+  Enabled: false
