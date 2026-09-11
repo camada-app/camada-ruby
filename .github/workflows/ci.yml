@@ -1,0 +1,27 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ruby: ["3.1", "3.2", "3.3"]
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: camada-ruby }
+      # The golden snapshot fixtures the suite is pinned to, and the beacon build the gem vendors.
+      - uses: actions/checkout@v4
+        with: { repository: ${{ github.repository_owner }}/camada-core, path: camada-core }
+      - uses: actions/checkout@v4
+        with: { repository: ${{ github.repository_owner }}/camada-browser, path: camada-browser }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22.x }
+      - run: npm install && npm run build
+        working-directory: camada-browser
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          working-directory: camada-ruby
+      - run: bundle exec rubocop && bundle exec rspec
+        working-directory: camada-ruby
