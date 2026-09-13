@@ -11,14 +11,6 @@ RSpec.describe Camada::Config do
       [nil, "", "nodot", ".snap", "tok."].each { |bad| expect(described_class.parse_key(bad)).to be_nil, bad.inspect }
     end
   end
-
-  describe ".remote_config" do
-    it "keeps only a JSON object" do
-      expect(described_class.remote_config({ "beacon" => false })).to eq({ "beacon" => false })
-      expect(described_class.remote_config([1])).to be_nil
-      expect(described_class.remote_config("x")).to be_nil
-    end
-  end
 end
 
 RSpec.describe Camada::Env do

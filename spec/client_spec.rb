@@ -1,8 +1,6 @@
 # frozen_string_literal: true
 
 require "socket"
-require "zlib"
-require "stringio"
 
 # SnapshotClient: the single-tenant port of the edge collector's snapshot lifecycle over the
 # GET /snapshot contract (200 frame + etag + x-camada-config; 304 unchanged; 204 nothing
@@ -16,15 +14,6 @@ RSpec.describe Camada::Snapshot::Client do
   end
 
   def input(ip) = Camada::Snapshot::MatchInput.new(ip: ip)
-
-  def wait_until(seconds = 2)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
-    until yield
-      raise "condition never met" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-
-      sleep 0.005
-    end
-  end
 
   it "fails open while cold" do
     v = client(FakeAnalyst.new).verdict(input(blocked))
@@ -153,7 +142,7 @@ RSpec.describe Camada::Snapshot::Client do
     c = client(a)
     c.ensure_fresh
     c.ensure_fresh
-    wait_until { c.verdict(input("0.0.0.0")).reason != "cold" }
+    Host.wait_until { c.verdict(input("0.0.0.0")).reason != "cold" }
     expect(c.verdict(input(blocked)).block).to be(true)
     expect(a.snapshot_requests.length).to eq(1)
     c.ensure_fresh # fresh: no new poll
@@ -166,7 +155,7 @@ RSpec.describe Camada::Snapshot::Client do
     c = described_class.new(url, "snap-test", transport: a, mode: :timer, refresh_s: 0.02)
     c.start
     begin
-      wait_until { a.snapshot_requests.length >= 3 }
+      Host.wait_until { a.snapshot_requests.length >= 3 }
     ensure
       c.stop
     end
@@ -183,7 +172,7 @@ RSpec.describe Camada::Snapshot::Client do
     n = a.snapshot_requests.length
     c.after_fork! # the child's copy: no thread, then a fresh one polling on its own
     begin
-      wait_until { a.snapshot_requests.length >= n + 2 }
+      Host.wait_until { a.snapshot_requests.length >= n + 2 }
     ensure
       c.stop
     end
@@ -208,14 +197,6 @@ RSpec.describe Camada::Snapshot::Client do
   end
 
   describe "the Net::HTTP transport" do
-    def gzip(s)
-      io = StringIO.new("".b)
-      gz = Zlib::GzipWriter.new(io)
-      gz.write(s)
-      gz.close
-      io.string
-    end
-
     # A one-shot HTTP/1.1 server on a loopback port: answers every request with `body` gzipped.
     def serve_once(body, gz: true)
       srv = TCPServer.new("127.0.0.1", 0)
@@ -224,7 +205,7 @@ RSpec.describe Camada::Snapshot::Client do
       t = Thread.new do
         sock = srv.accept
         seen << sock.readpartial(65_536) # the request head (and small body)
-        payload = gz ? gzip(body) : body
+        payload = gz ? FakeAnalyst.gzip_bytes(body) : body
         encoding = gz ? "content-encoding: gzip\r\n" : ""
         head = "HTTP/1.1 200 OK\r\ncontent-length: #{payload.bytesize}\r\netag: \"z\"\r\n#{encoding}connection: close\r\n\r\n"
         sock.write(head + payload)

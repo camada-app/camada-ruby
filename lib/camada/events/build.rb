@@ -50,7 +50,7 @@ module Camada
       (r.headers || []).each do |name, value|
         k = name.downcase
         hn += 1
-        hb += name.length + value.length
+        hb += name.bytesize + value.bytesize # bytes on the wire, as the collector and the WSGI (latin-1) port count them
         names << k
         first[k] = value unless first.key?(k)
         mask |= HDR_BIT.fetch(k, 0)
