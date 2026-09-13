@@ -22,8 +22,6 @@ module Host
       v = headers.find { |k, _| k.downcase == name }&.last
       v.nil? ? [] : Array(v)
     end
-
-    def text = body
   end
 
   Call = Struct.new(:method, :path, :headers, :body, :peer, :https, :content_length, keyword_init: true)
@@ -32,15 +30,21 @@ module Host
     Camada::Engine.new(env: ENV_BASE.merge(env || {}), transport: a, **opts)
   end
 
-  def self.loaded(engine)
-    raise "no snapshot client" if engine.snap.nil?
-
-    400.times do
-      return if engine.snap.verdict(Camada::Snapshot::MatchInput.new(ip: "0.0.0.0")).reason != "cold"
+  # Polls the block every 5 ms until it is truthy; raises past the budget.
+  def self.wait_until(seconds = 2, what = "condition never met")
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    until yield
+      raise what if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
       sleep 0.005
     end
-    raise "snapshot never loaded"
+  end
+
+  def self.loaded(engine)
+    raise "no snapshot client" if engine.snap.nil?
+
+    probe = Camada::Snapshot::MatchInput.new(ip: "0.0.0.0")
+    wait_until(2, "snapshot never loaded") { engine.snap.verdict(probe).reason != "cold" }
   end
 
   class RackDriver

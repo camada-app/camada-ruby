@@ -132,12 +132,6 @@ module Camada
 
       def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
-      def parse_json(raw)
-        JSON.parse(raw)
-      rescue JSON::ParserError
-        nil
-      end
-
       # Sleeps one cadence; true when stop was called meanwhile.
       def wait_stop(seconds)
         @stop_m.synchronize do
@@ -190,8 +184,8 @@ module Camada
       def read_config(raw)
         return if raw.nil? || raw.empty?
 
-        cfg = Config.remote_config(parse_json(raw))
-        return if cfg.nil? # not an object, or not JSON: keep the previous config
+        cfg = Camada.parse_json(raw)
+        return unless cfg.is_a?(Hash) # not an object, or not JSON: keep the previous config
 
         @config = cfg
         # the server steers the poll cadence per tenant (its cost lever) unless the client pinned one

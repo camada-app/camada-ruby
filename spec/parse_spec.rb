@@ -135,6 +135,22 @@ RSpec.describe Camada::Snapshot do
     expect(m.match(input(ua: "ok")).block).to be(true)
   end
 
+  it "never raises on a binary value against a non-ASCII contains or starts_with needle" do
+    # Puma's env strings are ASCII-8BIT; a rule value is UTF-8. `include?` across that pair raises
+    # once either side carries a high byte — and an exception here would let the later ip rule go unread.
+    n = (203 << 24) | (0 << 16) | (113 << 8) | 66
+    m = rules_snapshot(
+      [{ "id" => "ua", "action" => "block", "conds" => [{ "f" => "ua", "op" => "contains", "v" => "é" }] },
+       { "id" => "pfx", "action" => "block", "conds" => [{ "f" => "path", "op" => "starts_with", "v" => "/é" }] },
+       { "id" => "ip", "action" => "block", "conds" => [{ "f" => "ip", "op" => "is_in", "set" => true }] }],
+      [[14, [2, n, n]], [15, [2]]]
+    )
+    expect(m.match(input(ua: "x\xff".b, path: "/\xff".b)).rule).to be_nil
+    expect(m.match(input(ua: "x\xff".b, path: "/\xff".b, ip: "203.0.113.66")).rule).to eq("ip")
+    expect(m.match(input(ua: "café")).rule).to eq("ua")
+    expect(m.match(input(path: "/été")).rule).to eq("pfx")
+  end
+
   it "serves concurrent requests from one matcher without crosstalk" do
     a = (10 << 24) | 1
     m = rules_snapshot(

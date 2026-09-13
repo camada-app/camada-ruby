@@ -29,7 +29,7 @@ module Camada
       http.use_ssl = uri.scheme == "https"
       http.open_timeout = req.timeout_s
       http.read_timeout = req.timeout_s
-      http.write_timeout = req.timeout_s if http.respond_to?(:write_timeout=)
+      http.write_timeout = req.timeout_s
       r = Net::HTTPGenericRequest.new(req.method, !req.body.nil?, true, uri.request_uri)
       (req.headers || {}).each { |k, v| r[k] = v unless k.downcase == "accept-encoding" }
       r.body = req.body if req.body

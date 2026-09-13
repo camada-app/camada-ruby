@@ -105,6 +105,18 @@ RSpec.describe Camada::Engine do
       expect(ev).not_to have_key("wrn")
     end
 
+    it "reads Puma's binary env strings as UTF-8, so a stray byte neither escapes a rule nor costs the batch" do
+      h = site
+      binary = [["user-agent", "x\xff".b], ["accept", "*/*"]]
+      expect(h.call("GET", "/", headers: binary, peer: FakeAnalyst::BLOCKED_IP).status).to eq(403)
+      expect(h.call("GET", "/", headers: binary).status).to eq(200)
+      evs = h.events
+      expect(evs.map { |e| e.values_at("st", "ua") }).to eq([[403, "x\uFFFD"], [200, "x\uFFFD"]]) # both rows shipped, nothing dropped
+      expect(h.engine.queue.dropped).to eq(0)
+      info = Camada::Events::RequestInfo.new(method: "GET", host: "h", path: "/", query: "", headers: [["user-agent", "x\uFFFD"]])
+      expect(Camada::Events.build_wire_event(info, tap: "t", rid: "r")["hb"]).to eq(10 + 4) # hb counts wire bytes (U+FFFD is three), as the collector does
+    end
+
     it "reuses the session cookie and marks https secure" do
       h = site
       r = h.call("GET", "/", headers: [["cookie", "a=1; _sfp=sess-1; b=2"]], https: true)
@@ -203,7 +215,7 @@ RSpec.describe Camada::Engine do
       expect(js.status).to eq(200)
       expect(js.header("content-type")).to eq("application/javascript")
       expect(js.header("cache-control")).to eq("public, max-age=3600")
-      expect(js.text).to include("@camada/browser")
+      expect(js.body).to include("@camada/browser")
       body = JSON.generate({ "sdk" => "@camada/browser/0.2.0", "rid" => "r-1", "ip" => "9.9.9.9", "tap" => "proxy", "scr" => "1x1" })
       fp = h.call("POST", "/_cam/fp", headers: [["x-forwarded-for", "198.18.0.5"], ["content-type", "application/json"]], body: body)
       expect(fp.status).to eq(204)
@@ -315,7 +327,7 @@ RSpec.describe Camada::Engine do
       expect(r.header("content-type")).to eq("text/html; charset=utf-8")
       expect(r.header("x-camada-challenge")).to eq("1")
       expect(r.header("cache-control")).to eq("no-store")
-      expect(r.text).to include('action="/__camada/challenge"', 'name="to" value="/account?tab=1"')
+      expect(r.body).to include('action="/__camada/challenge"', 'name="to" value="/account?tab=1"')
       expect(h.seen).to eq([])
       ev, = h.events
       expect(ev.values_at("st", "blk", "p")).to eq([403, "challenge", "/account"])
@@ -326,7 +338,7 @@ RSpec.describe Camada::Engine do
       r = h.call("GET", "/api", headers: [["accept", "application/json"]], peer: challenged)
       expect(r.status).to eq(403)
       expect(r.header("content-type")).to eq("application/json")
-      expect(JSON.parse(r.text)).to eq({ "error" => "challenge_required" })
+      expect(JSON.parse(r.body)).to eq({ "error" => "challenge_required" })
       r2 = h.call("GET", "/api", headers: [["accept", "text/html"], ["sec-fetch-dest", "empty"]], peer: challenged)
       expect(r2.header("content-type")).to eq("application/json")
     end
@@ -340,7 +352,7 @@ RSpec.describe Camada::Engine do
 
     it "verifies, sets _cch, redirects back and ships ch 1" do
       h = site
-      nonce = nonce_of(h.call("GET", "/back?x=1", headers: Host::HTML, peer: challenged).text)
+      nonce = nonce_of(h.call("GET", "/back?x=1", headers: Host::HTML, peer: challenged).body)
       form = "nonce=#{nonce}&solution=#{solve(nonce)}&to=%2Fback%3Fx%3D1"
       r = h.call("POST", "/__camada/challenge", headers: [["content-type", "application/x-www-form-urlencoded"]], body: form, peer: challenged)
       expect(r.status).to eq(302)
@@ -361,11 +373,11 @@ RSpec.describe Camada::Engine do
 
     it "re-serves the page on a wrong solution or a forged nonce" do
       h = site
-      nonce = nonce_of(h.call("GET", "/", headers: Host::HTML, peer: challenged).text)
+      nonce = nonce_of(h.call("GET", "/", headers: Host::HTML, peer: challenged).body)
       r = h.call("POST", "/__camada/challenge", body: "nonce=#{nonce}&solution=1&to=%2F", peer: challenged)
       expect(r.status).to eq(403)
       expect(r.header("set-cookie")).to be_nil
-      expect(r.text).to include("camada-f")
+      expect(r.body).to include("camada-f")
       forged = "f" * 32
       r = h.call("POST", "/__camada/challenge", body: "nonce=#{forged}&solution=#{solve(forged)}&to=%2F", peer: challenged)
       expect(r.status).to eq(403)
@@ -404,11 +416,11 @@ RSpec.describe Camada::Engine do
       h = site(handler: gated)
       r = h.call("GET", "/challenge-me", headers: Host::HTML)
       expect(r.status).to eq(403)
-      expect(r.text).to include("camada-f")
+      expect(r.body).to include("camada-f")
       evs = h.events
       expect(evs.length).to eq(1)
       expect(evs[0]["blk"]).to eq("challenge") # one request, one event
-      nonce = nonce_of(r.text)
+      nonce = nonce_of(r.body)
       ok = h.call("POST", "/__camada/challenge", body: "nonce=#{nonce}&solution=#{solve(nonce)}&to=%2Fchallenge-me")
       cookie = (ok.header("set-cookie") || "").split(";")[0]
       expect(h.call("GET", "/challenge-me", headers: [*Host::HTML, ["cookie", cookie]]).body).to eq("secret page")
@@ -417,8 +429,8 @@ RSpec.describe Camada::Engine do
     it "moves with challenge_path" do
       h = site(challenge_path: "/verify")
       r = h.call("GET", "/", headers: Host::HTML, peer: challenged)
-      expect(r.text).to include('action="/verify"')
-      nonce = nonce_of(r.text)
+      expect(r.body).to include('action="/verify"')
+      nonce = nonce_of(r.body)
       expect(h.call("POST", "/verify", body: "nonce=#{nonce}&solution=#{solve(nonce)}&to=%2F", peer: challenged).status).to eq(302)
       expect(h.call("POST", "/__camada/challenge", body: "x=1", peer: challenged).status).to eq(403) # the old path is just a challenged request now
     end

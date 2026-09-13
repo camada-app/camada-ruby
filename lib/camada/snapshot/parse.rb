@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "set"
+require_relative "../constants"
 require_relative "../ipparse"
 
 module Camada
@@ -195,6 +196,17 @@ module Camada
       false
     end
 
+    # The same envelope for the plain string ops: Puma hands every env value to Rack as
+    # ASCII-8BIT while a rule's needle arrives from JSON as UTF-8, and `include?` /
+    # `start_with?` across that pair raise Encoding::CompatibilityError once either side carries a
+    # high byte. The adapter scrubs its values, but the matcher must not depend on it: an
+    # exception here escapes match(), handle() falls back to INERT and a blocked client passes.
+    def self.text_hit?
+      yield
+    rescue StandardError
+      false
+    end
+
     # ---------- custom rules (v5) ----------
 
     # The string one condition reads, or nil when this request cannot answer the field.
@@ -202,15 +214,13 @@ module Camada
     def self.field_value(f, r)
       case f
       when "asn" then r.asn&.to_s
-      when "country" then present(r.country)
-      when "tlsx" then present(r.tlsx)
+      when "country" then Camada.present(r.country)
+      when "tlsx" then Camada.present(r.tlsx)
       when "path" then r.path
-      when "ua" then present(r.ua)
+      when "ua" then Camada.present(r.ua)
       end
       # an entity-plane field (bot.verified, rule) answers nil: never true here
     end
-
-    def self.present(s) = s.nil? || s.empty? ? nil : s
 
     # One condition -> a predicate. `sets` yields this rule's (v4, v6) section pair per ip
     # condition, in condition order, so an ip condition consumes the next one.
@@ -263,13 +273,13 @@ module Camada
         needle = values[0]
         lambda do |r|
           v = read.call(r)
-          !v.nil? && v.include?(needle)
+          !v.nil? && text_hit? { v.include?(needle) }
         end
       when "starts_with"
         prefix = values[0]
         lambda do |r|
           v = read.call(r)
-          !v.nil? && v.start_with?(prefix)
+          !v.nil? && text_hit? { v.start_with?(prefix) }
         end
       else # is | is_not | is_in | not_in
         members = values.to_set

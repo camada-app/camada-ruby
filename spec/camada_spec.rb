@@ -7,8 +7,6 @@ RSpec.describe Camada do
 
   after { described_class.reset! }
 
-  def env_with(ctx) = ctx.nil? ? {} : { "camada" => ctx }
-
   it "builds one default engine from the environment and replaces it on configure" do
     described_class.reset!
     e1 = described_class.default(env: Host::ENV_BASE, transport: a)

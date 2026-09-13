@@ -192,8 +192,8 @@ module Camada
         return "ip4" if n4 >= 0 && blocked4?(n4)
         return "ip6" if !w.nil? && blocked6?(w)
         return "asn" if !i.asn.nil? && blocked_asn?(i.asn)
-        return "country" if present?(i.country) && !s.country.empty? && s.country.include?(i.country)
-        return "tls" if present?(i.tlsx) && s.tls.include?(i.tlsx)
+        return "country" if Camada.present(i.country) && !s.country.empty? && s.country.include?(i.country)
+        return "tls" if Camada.present(i.tlsx) && s.tls.include?(i.tlsx)
         if (!s.paths_exact.empty? || !s.paths_prefix.empty? || !s.paths_regex.empty?) && blocked_path?(Snapshot.clean_path(i.path))
           return "path"
         end
@@ -207,7 +207,7 @@ module Camada
         return "ip4" if n4 >= 0 && Snapshot.in_range4?(st.r4, n4)
         return "ip6" if !w.nil? && Snapshot.in_range6?(st.r6, st.n6, w)
         return "asn" if !i.asn.nil? && st.asn.include?(i.asn)
-        return "country" if present?(i.country) && st.country.include?(i.country)
+        return "country" if Camada.present(i.country) && st.country.include?(i.country)
 
         if !st.paths_exact.empty? || !st.paths_prefix.empty?
           p = Snapshot.clean_path(i.path)
@@ -216,8 +216,6 @@ module Camada
         end
         nil
       end
-
-      def present?(s) = !s.nil? && !s.empty?
     end
   end
 end

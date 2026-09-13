@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "config"
+require_relative "constants"
 
 module Camada
   # Environment wiring. The two-line quickstart depends on this doing the right thing:
@@ -30,21 +31,17 @@ module Camada
       key = Config.parse_key(env["CAMADA_KEY"])
       ingest_token = key ? key[0] : env["CAMADA_TOKEN"]
       snap_token = key ? key[1] : env["CAMADA_SNAPSHOT_TOKEN"]
-      return nil if blank?(ingest_token) || blank?(snap_token)
+      return nil if Camada.present(ingest_token).nil? || Camada.present(snap_token).nil?
 
-      ingest_url = (present(env["CAMADA_INGEST_URL"]) || DEFAULT_INGEST_URL).sub(%r{/+\z}, "")
+      ingest_url = (Camada.present(env["CAMADA_INGEST_URL"]) || DEFAULT_INGEST_URL).sub(%r{/+\z}, "")
       new(
         ingest_token: ingest_token, snap_token: snap_token,
-        secret: present(env["CAMADA_KEY"]) || "#{ingest_token}.#{snap_token}",
+        secret: Camada.present(env["CAMADA_KEY"]) || "#{ingest_token}.#{snap_token}",
         ingest_url: ingest_url,
-        snapshot_url: present(env["CAMADA_SNAPSHOT_URL"]) || "#{ingest_url}/snapshot",
+        snapshot_url: Camada.present(env["CAMADA_SNAPSHOT_URL"]) || "#{ingest_url}/snapshot",
         serverless: env["CAMADA_SERVERLESS"] == "1",
         trusted_proxy: Config.parse_trusted_proxy_env(env["CAMADA_TRUSTED_PROXY"])
       )
     end
-
-    def self.blank?(s) = s.nil? || s.empty?
-    def self.present(s) = blank?(s) ? nil : s
-    private_class_method :blank?, :present
   end
 end

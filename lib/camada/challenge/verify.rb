@@ -54,7 +54,7 @@ module Camada
 
       # The whole submission: the nonce is ours and unexpired, and the work is done.
       def verify?(ip, now_ms, nonce, solution)
-        nonce_valid?(ip, now_ms, nonce) && solution_ok?(nonce || "", solution)
+        nonce_valid?(ip, now_ms, nonce) && solution_ok?(nonce, solution)
       end
 
       private
