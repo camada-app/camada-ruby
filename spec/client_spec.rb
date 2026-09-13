@@ -204,7 +204,11 @@ RSpec.describe Camada::Snapshot::Client do
       seen = +""
       t = Thread.new do
         sock = srv.accept
-        seen << sock.readpartial(65_536) # the request head (and small body)
+        loop do # the whole request: Net::HTTP writes the head and the body as separate segments
+          seen << sock.readpartial(65_536)
+          head_end = seen.index("\r\n\r\n")
+          break if head_end && seen.bytesize >= head_end + 4 + seen[/^content-length: (\d+)/i, 1].to_i
+        end
         payload = gz ? FakeAnalyst.gzip_bytes(body) : body
         encoding = gz ? "content-encoding: gzip\r\n" : ""
         head = "HTTP/1.1 200 OK\r\ncontent-length: #{payload.bytesize}\r\netag: \"z\"\r\n#{encoding}connection: close\r\n\r\n"
