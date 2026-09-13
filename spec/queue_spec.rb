@@ -5,15 +5,6 @@
 RSpec.describe Camada::Events::Queue do
   def queue(a, **kw) = described_class.new("https://analyst.test", "tok-test", transport: a, sdk: "@camada/ruby/0.0.0", **kw)
 
-  def wait_until(seconds = 2)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
-    until yield
-      raise "condition never met" if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
-
-      sleep 0.005
-    end
-  end
-
   it "posts a JSON array with the tenant and sdk headers" do
     a = FakeAnalyst.new
     seen = []
@@ -36,7 +27,7 @@ RSpec.describe Camada::Events::Queue do
     a = FakeAnalyst.new
     q = queue(a, max_batch: 3, flush_s: 60)
     3.times { |i| q.push({ "i" => i }) }
-    wait_until { !a.events.empty? }
+    Host.wait_until { !a.events.empty? }
     expect(a.events).to eq([[{ "i" => 0 }, { "i" => 1 }, { "i" => 2 }]])
     q.stop
   end
@@ -45,7 +36,7 @@ RSpec.describe Camada::Events::Queue do
     a = FakeAnalyst.new
     q = queue(a, flush_s: 0.02)
     q.push({ "i" => 1 })
-    wait_until { !a.events.empty? }
+    Host.wait_until { !a.events.empty? }
     expect(a.events).to eq([[{ "i" => 1 }]])
     q.stop
   end
@@ -67,6 +58,21 @@ RSpec.describe Camada::Events::Queue do
     expect(q.dropped).to eq(2)
     q.flush
     expect(a.events).to eq([[{ "i" => 2 }, { "i" => 3 }, { "i" => 4 }]])
+    q.stop
+  end
+
+  it "drops only the row that cannot be serialised, never the batch" do
+    a = FakeAnalyst.new
+    q = queue(a)
+    q.push({ "ua" => "\xff".b }) # an adapter that did not scrub: JSON.generate raises on this row alone
+    q.push({ "st" => 403 })
+    q.flush
+    expect(a.events).to eq([[{ "st" => 403 }]])
+    expect(q.dropped).to eq(1)
+    q.push({ "ua" => "\xff".b })
+    q.flush
+    expect(a.events.length).to eq(1) # nothing serialisable: no POST at all
+    expect(q.dropped).to eq(2)
     q.stop
   end
 
@@ -119,7 +125,7 @@ RSpec.describe Camada::Events::Queue do
     q = queue(a, max_batch: 1, flush_s: 60)
     q.transport = slow
     q.push({ "i" => 1 })
-    wait_until { q.inflight? }
+    Host.wait_until { q.inflight? }
     q.push({ "i" => 2 })
     q.flush # the request-path flush yields to the one in flight
     expect(a.events).to eq([])

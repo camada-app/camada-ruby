@@ -35,8 +35,7 @@ build starts the snapshot poll on a thread and never blocks, so the request that
 answered cold: it passes (fail open), and so does anything else that arrives before that first
 poll lands (a few hundred milliseconds against a local analyst; snapshot-size and network bound).
 To enforce from request 1, warm the engine at boot (an initializer, or `config.ru` before `run`)
-by waiting for the boot poll — `snap.refresh` alone is not it, the boot poll already holds the
-single-in-flight lock:
+by waiting for the boot poll:
 
 ```ruby
 engine = Camada.default          # builds the engine; the boot poll is already running on its thread
@@ -65,7 +64,7 @@ use Camada::Rack, engine
 
 1. Keeps the snapshot fresh. A Ruby server is a long-lived process, so the default is a poll
    thread at the cadence your tenant config sets (`poll_seconds`), with ETag/304 and gzip on the
-   wire. `CAMADA_SERVERLESS=1` switches to a per-request staleness check with no thread. Every
+   wire. `CAMADA_SERVERLESS=1` switches to a per-request staleness check with no poll thread. Every
    poll and event batch carries `x-camada-sdk: @camada/ruby/<version>`, and polls ask for
    snapshot v5 (`x-camada-snapshot: 5`) — the container that carries your ordered custom rules.
 2. Resolves the client from the socket peer (`REMOTE_ADDR`), combined with `X-Forwarded-For`
@@ -147,7 +146,9 @@ valid `_cch`, then `nil`.
 ## What this tap can see
 
 `sdk-ruby` is an in-app tap: status, latency, session, the beacon's browser signals and your
-outcomes. The Rack env carries no wire header order (`hord` is the env's order), so the analyst
+outcomes. Puma hands the env to Rack as binary strings; the middleware reads them as UTF-8 with
+invalid bytes replaced (U+FFFD) before matching and shipping, so a stray high byte in a header
+neither escapes a rule nor costs the batch it rides in. The Rack env carries no wire header order (`hord` is the env's order), so the analyst
 reads no HEADER_ORDER signal from this tap, and it never scores the absence of header order, ASN,
 country or a TLS fingerprint against a request; ASN and country it resolves itself. Enforcement
 at this position covers ip, path, user-agent and header conditions — ASN, country and TLS entries
@@ -168,8 +169,8 @@ here (and never raises), while it does at the edge.
   are installed — an app owns its own shutdown — so a worker killed by SIGKILL, or by SIGTERM
   without a handler, may drop its last batch.
 - Serverless: `CAMADA_SERVERLESS=1`. A cold invocation fails open and catches up on the next one.
-- Under Rack 3 the middleware emits lower-case header names and appends `set-cookie` as an Array;
-  under Rack 2 it joins cookies with `"\n"`. It never requires `rack` itself.
+- The middleware writes lower-case header names; it appends `set-cookie` as an Array under Rack 3
+  and joins cookies with `"\n"` under Rack 2. It never requires `rack` itself.
 
 ## Fail open
 

@@ -49,7 +49,15 @@ module Camada
 
   # camada answered the request; the adapter writes exactly this. `headers` is a Hash of
   # lower-cased names (Rack 3 style), `body` a String.
-  Answer = Struct.new(:status, :headers, :body, keyword_init: true)
+  Answer = Struct.new(:status, :headers, :body, keyword_init: true) do
+    # The Rack triple. content-length is stamped except where a body is forbidden (1xx, 204,
+    # 304): Rack::Lint — in every `rackup` development stack — rejects it there, and the beacon's
+    # 204 would 500 on every page in dev.
+    def to_rack
+      h = status < 200 || status == 204 || status == 304 ? headers : headers.merge("content-length" => body.bytesize.to_s)
+      [status, h, [body]]
+    end
+  end
 
   # Run the app. rid/set_cookie ride the response; ctx is stored on the host request
   # (env["camada"]); on_finish.call(status) is called once at the end. A nil on_finish means inert.
@@ -159,7 +167,7 @@ module Camada
     # App-context outcome events (login failed, signup, ...). The identifier is HMAC-hashed
     # in-process; the raw value never reaches the queue.
     def track(ctx, event, user: nil)
-      return if disabled? || @queue.nil? || @env.nil?
+      return if disabled? || @queue.nil?
 
       uid = user.nil? || user.to_s.empty? ? nil : Redact.hash_user_id(user.to_s, @env.ingest_token)
       c = ctx || {}
@@ -193,9 +201,8 @@ module Camada
     def secure?(req) = req.https || req.header("x-forwarded-proto") == "https"
 
     def decide(req, body)
-      return INERT if disabled? || @snap.nil? || @queue.nil? || @env.nil?
+      return INERT if disabled? || @snap.nil?
 
-      queue = @queue
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       @snap.ensure_fresh
       ip = client_ip(req)
@@ -210,7 +217,7 @@ module Camada
         ev["st"] = 403       # blocked requests always ship: silent expiry makes blocks oscillate
         ev["blk"] = v.reason # the reason rides the event so the analyst counts SDK blocks, not the app's own 403s
         ev["rl"] = v.rule if v.rule
-        queue.push(ev)
+        @queue.push(ev)
         return Answer.new(status: 403, headers: headers, body: "Forbidden")
       end
       # `warn` passes the request and only marks its event (below, on finish); a skip passes
@@ -262,7 +269,7 @@ module Camada
         ev["dur"] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).to_i
         ev["rt"] = req.route if req.route
         ev["wrn"] = warn_rule if warn_rule # §D3: the warn rule that let this request through
-        queue.push(ev)
+        @queue.push(ev)
       rescue StandardError => e
         Guarded.log_rate_limited(e)
       end
@@ -284,17 +291,11 @@ module Camada
       return Answer.new(status: 413, headers: {}, body: "") if body.nil?
 
       answer = Answer.new(status: 204, headers: { "cache-control" => "no-store" }, body: "")
-      parsed = parse_json(body)
+      parsed = Camada.parse_json(body)
       return answer unless parsed.is_a?(Hash)
 
       @queue.push(parsed.merge("sig" => 1, "ip" => ip, "tap" => TAP)) # spread first: ip and tap are the server's word
       answer
-    end
-
-    def parse_json(s)
-      JSON.parse(s)
-    rescue JSON::ParserError
-      nil
     end
 
     # ---- challenge ----

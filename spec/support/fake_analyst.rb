@@ -28,6 +28,14 @@ class FakeAnalyst
     [m.bytesize].pack("V") + m + body
   end
 
+  def self.gzip_bytes(s)
+    io = StringIO.new("".b)
+    gz = Zlib::GzipWriter.new(io)
+    gz.write(s)
+    gz.close
+    io.string
+  end
+
   attr_accessor :config, :snapshot_down, :ingest_down, :snapshot_status, :container, :gzip, :ingest_status
   attr_reader :events, :sdk_headers, :snapshot_versions, :snapshot_requests
 
@@ -73,7 +81,7 @@ class FakeAnalyst
       headers["etag"] = etag
       if @gzip && req.headers.fetch("accept-encoding", "").include?("gzip")
         headers["content-encoding"] = "gzip"
-        return Camada::Transport.response(200, headers, gzip_bytes(body))
+        return Camada::Transport.response(200, headers, FakeAnalyst.gzip_bytes(body))
       end
       return Camada::HttpResponse.new(status: 200, headers: headers, body: body)
     end
@@ -84,13 +92,5 @@ class FakeAnalyst
       return Camada::HttpResponse.new(status: @ingest_status, headers: {}, body: "".b)
     end
     raise "unmocked request: #{req.url}"
-  end
-
-  def gzip_bytes(s)
-    io = StringIO.new("".b)
-    gz = Zlib::GzipWriter.new(io)
-    gz.write(s)
-    gz.close
-    io.string
   end
 end

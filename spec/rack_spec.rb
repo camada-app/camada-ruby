@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rack"
+require "rack/lint"
 require "stringio"
 
 # What only the Rack host can show: the env mapping, a body camada read being put back, the
@@ -23,6 +24,10 @@ RSpec.describe Camada::Rack do
     expect(req.header("nope")).to be_nil
     bare = described_class.req_from_env({})
     expect([bare.method, bare.path, bare.query, bare.host, bare.http_version, bare.peer, bare.https]).to eq(["GET", "/", "", "", nil, nil, false])
+    # Puma's env values are ASCII-8BIT: read as UTF-8, an invalid byte replaced, so nothing downstream raises
+    bin = described_class.req_from_env({ "PATH_INFO" => "/\xff".b, "QUERY_STRING" => "q=\xff".b, "HTTP_USER_AGENT" => "x\xff".b, "HTTP_HOST" => "h".b })
+    expect([bin.path, bin.query, bin.header("user-agent"), bin.host]).to eq(["/\uFFFD", "?q=\uFFFD", "x\uFFFD", "h"])
+    expect([bin.path, bin.host].map(&:encoding).uniq).to eq([Encoding::UTF_8])
   end
 
   it "joins repeated headers the way node:http does" do
@@ -61,6 +66,83 @@ RSpec.describe Camada::Rack do
     expect(described_class.new(app, engine).call(env2)[0]).to eq(200)
   end
 
+  it "never reads past the cap on the over-cap path: the rest streams to the app lazily" do
+    big = ("y" * 70_000).b
+    inner = StringIO.new(big)
+    def inner.read(length = nil, buf = nil)
+      raise "slurped the body" if length.nil? # what a chunked 1 GB post would cost in RSS
+
+      buf ? super : super(length)
+    end
+    got = +""
+    app = lambda do |env|
+      input = env["rack.input"]
+      while (chunk = input.read(4096))
+        got << chunk
+      end
+      input.close
+      [200, {}, ["ok"]]
+    end
+    env = { "REQUEST_METHOD" => "POST", "PATH_INFO" => "/__camada/challenge", "rack.input" => inner }
+    expect(described_class.new(app, engine).call(env)[0]).to eq(200)
+    expect(got).to eq(big)
+    expect(inner).to be_closed
+
+    rest = StringIO.new("abc\nd\n".b)
+    chained = Camada::Rack::ChainedInput.new(rest.read(2), rest)
+    expect(chained.gets).to eq("abc\n") # a line that straddles the seam
+    expect(chained.gets).to eq("d\n")
+    expect(chained.gets).to be_nil
+    chained.rewind # Rack 2: back to where camada left the stream, the head not counted twice
+    expect(chained.read).to eq("abc\nd\n")
+    expect(chained.read(1)).to be_nil
+    expect(chained.read(0)).to eq("")
+    chained.rewind
+    buf = +""
+    expect(chained.read(4, buf)).to equal(buf)
+    expect(buf).to eq("abc\n")
+    expect(chained.each.to_a).to eq(["d\n"])
+  end
+
+  it "answers under Rack::Lint: no content-length on the beacon's 204, the rest sized" do
+    lint = Rack::Lint.new(described_class.new(->(_env) { [200, {}, ["app"]] }, engine))
+    consume = lambda do |path, **opts|
+      env = Rack::MockRequest.env_for(path, **opts)
+      env["REMOTE_ADDR"] = Host::PEER
+      status, headers, body = lint.call(env)
+      out = +""
+      body.each { |s| out << s }
+      body.close
+      [status, headers, out]
+    end
+    status, headers, = consume.call("/_cam/fp", method: "POST", input: "{}")
+    expect(status).to eq(204)
+    expect(headers).not_to have_key("content-length")
+    status, headers, out = consume.call("/_cam/b.js")
+    expect([status, headers["content-length"]]).to eq([200, out.bytesize.to_s])
+    status, headers, = consume.call("/__camada/challenge", method: "POST", input: "nonce=x&solution=1&to=/")
+    expect([status, headers["content-type"]]).to eq([403, "text/html; charset=utf-8"]) # the page again: a bad solution
+    expect(Camada::Answer.new(status: 304, headers: {}, body: "").to_rack[1]).to eq({})
+  end
+
+  it "passes a Rack 3 streaming body through untouched and fires on_finish once" do
+    app = ->(_env) { [200, { "content-type" => "text/plain" }, ->(stream) { stream.write("hi") }] }
+    env = Rack::MockRequest.env_for("/stream")
+    env["REMOTE_ADDR"] = Host::PEER
+    status, headers, body = Rack::Lint.new(described_class.new(app, engine)).call(env)
+    expect(status).to eq(200)
+    expect(headers["x-rid"]).to be_a(String)
+    expect(body.respond_to?(:each)).to be(false) # a Body answering `each` is Enumerable to every server: the socket would call it
+    expect(body.respond_to?(:call)).to be(true)
+    stream = StringIO.new
+    body.call(stream)
+    expect(stream.string).to eq("hi")
+    body.close # Puma closes the app body in its ensure, streaming or not
+    body.close
+    engine.queue.flush
+    expect(a.all_events.map { |e| e.values_at("p", "st") }).to eq([["/stream", 200]])
+  end
+
   it "closes the app body exactly once and fires on_finish once" do
     closes = []
     body_class = Class.new do
@@ -94,6 +176,7 @@ RSpec.describe Camada::Rack do
     stream_body = ->(stream) { streamed << stream }
     p2 = Camada::BodyProxy.new(stream_body) { fired << :b }
     expect(p2.respond_to?(:call)).to be(true)
+    expect(p2.respond_to?(:each)).to be(false)
     p2.call(:stream)
     expect(streamed).to eq([:stream])
     p2.close
@@ -101,7 +184,11 @@ RSpec.describe Camada::Rack do
     expect(p2.closed?).to be(true)
     plain = Camada::BodyProxy.new(%w[a b]) { fired << :c }
     expect(plain.respond_to?(:to_path)).to be(false)
+    expect(plain.respond_to?(:to_str)).to be(false)
     expect(plain.each.to_a).to eq(%w[a b])
+    expect(plain.to_ary).to eq(%w[a b]) # a body consumed via to_ary closes itself (SPEC)
+    expect(fired).to eq(%i[b c])
+    expect(plain.closed?).to be(true)
   end
 
   it "fires on_finish with 500 and re-raises when the app raises" do

@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 module Camada
-  # Configuration shapes shared by the client and the engine. `parse_key` splits CAMADA_KEY, and
-  # `remote_config` is what GET /snapshot hands back in x-camada-config (whitelisted server-side):
-  # { tenant, beacon, sample, exclude, trusted_proxy, poll_seconds } with string keys, as JSON
-  # delivers them. A trusted-proxy config mirrors the server-validated tenant config
+  # Configuration shapes shared by the client and the engine. `parse_key` splits CAMADA_KEY. The
+  # remote config GET /snapshot hands back in x-camada-config (whitelisted server-side) is a
+  # plain Hash: { tenant, beacon, sample, exclude, trusted_proxy, poll_seconds } with string keys,
+  # as JSON delivers them. A trusted-proxy config mirrors the server-validated tenant config
   # (edge-analyst src/tenant-config.js): {mode: none} | {mode: hops, hops: N} | {mode: cidrs, cidrs: [...]} | {mode: vercel}.
   module Config
     # CAMADA_KEY is `<ingest_token>.<snap_token>` (printed by reconcile instructions and seed).
@@ -33,11 +33,6 @@ module Camada
         return cidrs.empty? ? nil : { "mode" => "cidrs", "cidrs" => cidrs }
       end
       nil
-    end
-
-    # The parsed x-camada-config header; anything but a JSON object is ignored (previous kept).
-    def self.remote_config(raw)
-      raw.is_a?(Hash) ? raw : nil
     end
   end
 end

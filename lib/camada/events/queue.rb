@@ -82,7 +82,9 @@ module Camada
             return if batch.empty?
 
             begin
-              body = JSON.generate(batch)
+              body = encode(batch)
+              next if body.nil?
+
               res = @transport.call(HttpRequest.new(method: "POST", url: "#{@url}/e", headers: headers, body: body, timeout_s: @timeout_s))
               raise "ingest unreachable" if res.status == 0
             rescue StandardError => e
@@ -142,6 +144,21 @@ module Camada
 
       def check_fork!
         after_fork! if Process.pid != @pid
+      end
+
+      # The batch as JSON, or nil when nothing in it can be serialised. The adapters scrub what
+      # they ship, but a row that still carries an invalid byte must cost that row alone, never
+      # the batch: blocked rows always ship, or blocks oscillate.
+      def encode(batch)
+        JSON.generate(batch)
+      rescue JSON::GeneratorError, EncodingError
+        rows = batch.filter_map do |ev|
+          JSON.generate(ev)
+        rescue JSON::GeneratorError, EncodingError
+          nil
+        end
+        @dropped += batch.length - rows.length
+        rows.empty? ? nil : "[#{rows.join(",")}]"
       end
 
       def wake

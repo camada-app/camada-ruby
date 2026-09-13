@@ -86,8 +86,7 @@ module Camada
     # browser holds a valid _cch, then nil.
     def serve_challenge(env)
       ctx = ctx_of(env)
-      a = engine_for(ctx).serve_challenge(ctx)
-      a.nil? ? nil : [a.status, a.headers.merge("content-length" => a.body.bytesize.to_s), [a.body]]
+      engine_for(ctx).serve_challenge(ctx)&.to_rack
     end
 
     private

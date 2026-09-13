@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "json"
+
 module Camada
   # Tap identifier this SDK claims on the wire. The server validates against its own enum and
   # derives the capability mask itself (edge-analyst src/capabilities.js): an SDK can never grant
@@ -20,4 +22,14 @@ module Camada
 
   SESSION_COOKIE = "_sfp"           # same cookie as the edge collector: sid/ns comparable across taps
   SESSION_MAX_AGE = 2_592_000       # 30 days
+
+  # nil for nil or "", else the string: the one nil-or-empty helper every module reads through.
+  def self.present(s) = s.nil? || s.empty? ? nil : s
+
+  # JSON.parse that answers nil for anything that is not JSON (a config header, a beacon body).
+  def self.parse_json(s)
+    JSON.parse(s)
+  rescue JSON::ParserError
+    nil
+  end
 end
