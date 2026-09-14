@@ -12,7 +12,7 @@ Gem::Specification.new do |spec|
   spec.description = "camada SDK for Ruby: inline enforcement of your snapshot (ordered custom rules, then allow, block, " \
                      "challenge), first-party beacon and proof-of-work challenge, batched event shipping. A Rack " \
                      "middleware for any Rack app (Sinatra, Rails via the Railtie, Hanami, plain Rack)."
-  spec.homepage = "https://github.com/camada/camada-ruby"
+  spec.homepage = "https://github.com/camada-app/camada-ruby"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1"
   spec.metadata["rubygems_mfa_required"] = "true"
