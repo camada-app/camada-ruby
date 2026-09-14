@@ -6,5 +6,6 @@ gemspec
 
 # Development only: the gem itself has no runtime dependencies (camada.gemspec).
 gem "rack", "~> 3.0" # Rack::MockRequest drives the middleware in the specs
+gem "rake", "~> 13.0" # `rake build` / `rake release` (publish.yml)
 gem "rspec", "~> 3.13"
 gem "rubocop", "~> 1.63"
