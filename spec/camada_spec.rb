@@ -20,7 +20,7 @@ RSpec.describe Camada do
   it "logs once when the key is missing and stays inert" do
     lines = []
     Camada::Guarded.logger = ->(s) { lines << s }
-    Camada::Guarded.instance_variable_set(:@last_log, 0.0)
+    Camada::Guarded.instance_variable_set(:@last_log, nil)
     begin
       e = described_class.configure(env: {}, transport: a)
       expect(e.env).to be_nil

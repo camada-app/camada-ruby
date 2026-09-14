@@ -487,7 +487,7 @@ RSpec.describe Camada::Engine do
     it "logs at most one line a minute" do
       lines = []
       Camada::Guarded.logger = ->(s) { lines << s }
-      Camada::Guarded.instance_variable_set(:@last_log, 0.0)
+      Camada::Guarded.instance_variable_set(:@last_log, nil)
       begin
         Camada::Guarded.log_rate_limited(RuntimeError.new("one\ntwo"))
         Camada::Guarded.log_rate_limited("two")
