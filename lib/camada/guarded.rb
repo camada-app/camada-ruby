@@ -4,7 +4,7 @@ module Camada
   # The fail-open envelope: a camada bug must never 5xx the customer. Every public entry point of
   # the SDK catches, falls back, and reports through log_rate_limited: at most one line a minute.
   module Guarded
-    @last_log = 0.0
+    @last_log = nil # monotonic seconds of the last line; nil until the first one
     @logger = nil
 
     class << self
@@ -12,8 +12,10 @@ module Camada
       attr_accessor :logger
 
       def log_rate_limited(err)
+        # CLOCK_MONOTONIC counts from boot, so a numeric "never" sentinel like 0.0 would
+        # swallow the first line on a host younger than a minute (fresh CI runners are).
         now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        return if now - @last_log < 60
+        return if @last_log && now - @last_log < 60
 
         @last_log = now
         line = "[camada] suppressed error (SDK fails open): #{describe(err)}"
