@@ -15,7 +15,7 @@ module Camada
     #   200  [u32 LE meta-length][meta JSON][BLK container] + etag + x-camada-config
     #   304  nothing changed; config header repeated (config refreshes every poll for free)
     #   204  authenticated, no snapshot published -> enforce nothing, fail open
-    # Semantics ported exactly: single-in-flight load; loaded_at stamped even on 204 (retry per
+    # Semantics ported exactly: single-in-flight load; loaded_at stamped last, even on 204 (retry per
     # poll cadence, not per request); any error keeps the previous snapshot; cold = fail open.
     # Timers are threads here: timer mode runs one thread per client sleeping on a condition
     # variable; lazy mode kicks a one-shot thread from ensure_fresh so the request path never
@@ -153,7 +153,17 @@ module Camada
         res = @transport.call(HttpRequest.new(method: "GET", url: @url, headers: headers, body: nil, timeout_s: @timeout_s))
         return unless [200, 204, 304].include?(res.status) # 401/5xx/network: keep what we have
 
-        @loaded_at = monotonic
+        # loaded_at is stamped last (even when the body turns out corrupt): "not cold" is what Puma's
+        # request threads read as "rules in place", so it must not be visible before the matcher and
+        # config are. It is assigned after both, so a thread that sees it sees them.
+        begin
+          publish(res)
+        ensure
+          @loaded_at = monotonic
+        end
+      end
+
+      def publish(res)
         read_config(res.headers["x-camada-config"])
         return if res.status == 304
 
