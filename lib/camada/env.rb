@@ -21,8 +21,7 @@ module Camada
   )
 
   class Env
-    # PLACEHOLDER default, the same one @camada/node and camada-python carry — confirm the
-    # production ingest domain before any RubyGems publish.
+    # Production ingest; CAMADA_INGEST_URL overrides it.
     DEFAULT_INGEST_URL = "https://in.camada.app"
 
     # nil (SDK stays inert, one log line) rather than raising on bad config. `env` is anything
