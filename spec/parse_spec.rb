@@ -170,3 +170,14 @@ RSpec.describe Camada::Snapshot do
     expect(wrong).to eq([0, 0])
   end
 end
+
+# contracts §D3 "Path matching": the golden fixtures pin the canon on ASCII input; these pin the
+# byte handling a Rack PATH_INFO can hand over (binary, invalid UTF-8) — it never raises.
+RSpec.describe "Camada::Snapshot.canon_path" do
+  it "canonicalises on bytes, whatever the string's encoding" do
+    expect(Camada::Snapshot.canon_path("/Caf\xC3\xA9/".b)).to eq("/caf%c3%a9")
+    expect(Camada::Snapshot.canon_path("/caf%C3%A9")).to eq("/caf%c3%a9")
+    expect(Camada::Snapshot.canon_path("/a\xFF%2F..;x/b".dup.force_encoding("UTF-8"))).to eq("/a%ff%2f../b") # %2F is not a separator, so ".." stays inside the segment
+    expect(Camada::Snapshot.path_forms("/x/%2e%2E/Y?q=1#f")).to eq(["/x/%2e%2E/Y", "/x/../y", "/y"])
+  end
+end
