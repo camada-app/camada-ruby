@@ -67,7 +67,8 @@ module Camada
 
     # The request a compiled condition reads. `ip6` is the parsed address words, or nil; `header`
     # is called with an already lower-cased name, absent where the tap cannot read headers.
-    RuleRequest = Struct.new(:n4, :ip6, :asn, :country, :tlsx, :path, :ua, :header, keyword_init: true)
+    # `paths` is the request path's [raw, lit, full] forms (Snapshot.path_forms).
+    RuleRequest = Struct.new(:n4, :ip6, :asn, :country, :tlsx, :paths, :ua, :header, keyword_init: true)
 
     CompiledRule = Struct.new(:id, :action, :conds)
 
@@ -82,8 +83,8 @@ module Camada
       m ||= {}
       asn = (m["asn"] || []).to_set(&:to_i)
       country = (m["country"] || []).to_set
-      exact = (m["pathsExact"] || []).to_set
-      prefix = (m["pathsPrefix"] || []).to_set
+      exact = (m["pathsExact"] || []).to_set { |p| canon_path(p.to_s) }
+      prefix = (m["pathsPrefix"] || []).to_set { |p| dir_key(p.to_s) }
       empty = r4.empty? && r6.empty? && asn.empty? && country.empty? && exact.empty? && prefix.empty?
       RangeSet.new(r4: r4, r6: r6, n6: r6.length >> 3, asn: asn, country: country, paths_exact: exact, paths_prefix: prefix, empty: empty)
     end
@@ -137,8 +138,8 @@ module Camada
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
     # Ruby by default, as JS reads them.
-    def self.compile_regex(pattern)
-      Regexp.new(js_to_onigmo(pattern))
+    def self.compile_regex(pattern, options = 0)
+      Regexp.new(js_to_onigmo(pattern), options)
     rescue RegexpError, TypeError, ArgumentError, EncodingError
       nil
     end
@@ -207,6 +208,122 @@ module Camada
       false
     end
 
+    # ---------- paths (contracts §D3 "Path matching") ----------
+    # A port of edge-analyst src/blocklist.js canonPath / pathForms / pathHit / pathPred. Both sides
+    # of a comparison are canonicalised so a rule catches every spelling a framework routes to the
+    # same handler: query cut at ? or #; per UTF-8 byte, %XX decoded when printable ASCII other
+    # than / and % (%2F stays %2f, one pass), every other byte written as lower-case %xx; ASCII
+    # lower-cased; each segment cut at its first ;; empty segments dropped; . and .. resolved
+    # (`full`; `lit` skips that step). A deny matches on raw, lit or full; an exemption (allow
+    # side, skip rule) needs lit AND full. Works on bytes, so a binary PATH_INFO never raises.
+    PATH_HEX = "0123456789abcdef"
+    CANON_PATH = %r{\A(?:/(?!\.\.?(?:/|\z))[a-z0-9\-._~!$&'()*+,=:@]+)+\z} # already canonical: skips the byte walk
+
+    def self.hexv(c)
+      if c.between?(48, 57) then c - 48
+      elsif c.between?(97, 102) then c - 87
+      elsif c.between?(65, 70) then c - 55
+      else -1
+      end
+    end
+
+    def self.strip_query(raw)
+      p = raw.nil? || raw.empty? ? "/" : raw
+      q = p.b.index(/[?#]/)
+      q.nil? ? p : p.byteslice(0, q)
+    end
+
+    def self.canonical?(p) = p == "/" || (p.ascii_only? && CANON_PATH.match?(p))
+
+    def self.canon_path(raw, dots: true)
+      p = strip_query(raw)
+      return p if canonical?(p)
+
+      b = p.bytes
+      s = +""
+      i = 0
+      while i < b.length
+        c = b[i]
+        decoded = c == 37 && i + 2 < b.length && hexv(b[i + 1]) >= 0 && hexv(b[i + 2]) >= 0
+        if decoded
+          c = (hexv(b[i + 1]) * 16) + hexv(b[i + 2])
+          i += 2
+        end
+        if decoded && c == 47 then s << "%2f" # a decoded %2F is never a separator
+        elsif c < 0x21 || c > 0x7e || c == 37 then s << "%" << PATH_HEX[c >> 4] << PATH_HEX[c & 15]
+        else s << (c.between?(65, 90) ? c + 32 : c).chr
+        end
+        i += 1
+      end
+      out = []
+      s.split("/").each do |seg|
+        k = seg.index(";")
+        seg = seg[0, k] unless k.nil?
+        next if seg.empty? || (dots && seg == ".")
+
+        if dots && seg == ".."
+          out.pop
+          next
+        end
+        out << seg
+      end
+      "/#{out.join("/")}"
+    end
+
+    # [raw (query cut), lit, full] for one request path.
+    def self.path_forms(raw)
+      p = strip_query(raw)
+      return [p, p, p] if canonical?(p)
+
+      [p, canon_path(p, dots: false), canon_path(p)]
+    end
+
+    def self.path_dir(p) = p.end_with?("/") ? p : "#{p}/"
+
+    # A prefix entry or a starts_with value ending in / -> its canonical directory key ('/' stays '/').
+    def self.dir_key(v) = path_dir(canon_path(v))
+
+    # Walks '/' boundaries: /a/b tries /, /a/, /a/b/.
+    def self.prefix_hit?(prefixes, path)
+      d = path_dir(path).b
+      i = 0
+      until i.nil?
+        return true if prefixes.include?(d.byteslice(0, i + 1))
+
+        i = d.index("/", i + 1)
+      end
+      false
+    end
+
+    # One path form against a side's (or the block side's) exact, prefix and regex entries.
+    def self.path_in?(st, path, regexes = [])
+      return true if st.paths_exact.include?(path)
+      return true if !st.paths_prefix.empty? && prefix_hit?(st.paths_prefix, path)
+
+      regexes.any? { |rx| regex_hit?(rx, path) }
+    end
+
+    # Does the block hold for this request's path? deny = any spelling; an exemption = both canonical forms.
+    def self.path_hit?(forms, deny, &pred)
+      deny ? (pred.call(forms[0]) || pred.call(forms[1]) || pred.call(forms[2])) : (pred.call(forms[1]) && pred.call(forms[2]))
+    end
+
+    # One path condition -> a predicate over a single path form.
+    def self.path_pred(op, values)
+      case op
+      when "matches"
+        rx = compile_regex(values[0], Regexp::IGNORECASE)
+        ->(p) { !rx.nil? && regex_hit?(rx, p) }
+      when "starts_with"
+        v = values[0]
+        key = v.end_with?("/") ? dir_key(v) : canon_path(v)
+        ->(p) { text_hit? { path_dir(p).start_with?(key) } }
+      else
+        set = values.to_set { |v| canon_path(v) }
+        ->(p) { set.include?(p) }
+      end
+    end
+
     # ---------- custom rules (v5) ----------
 
     # The string one condition reads, or nil when this request cannot answer the field.
@@ -216,7 +333,6 @@ module Camada
       when "asn" then r.asn&.to_s
       when "country" then Camada.present(r.country)
       when "tlsx" then Camada.present(r.tlsx)
-      when "path" then r.path
       when "ua" then Camada.present(r.ua)
       end
       # an entity-plane field (bot.verified, rule) answers nil: never true here
@@ -224,9 +340,14 @@ module Camada
 
     # One condition -> a predicate. `sets` yields this rule's (v4, v6) section pair per ip
     # condition, in condition order, so an ip condition consumes the next one.
-    def self.compile_cond(c, sets)
+    def self.compile_cond(c, sets, deny = true)
       f = c["f"].to_s
       op = c["op"].to_s
+      if f == "path" # every path op reads the canonical forms (see "paths" above)
+        raw = c["v"]
+        pred = path_pred(op, raw.is_a?(Array) ? raw.map(&:to_s) : [raw.to_s])
+        return ->(r) { path_hit?(r.paths, deny, &pred) }
+      end
       negate = op == "is_not" || op == "not_in"
       # A header condition reads the request through the caller's getter. The name is lower-cased
       # once, here; a tap that cannot read headers (no getter) and a header the request does not
@@ -306,7 +427,7 @@ module Camada
           [k < v4.length ? v4[k].slice(1, v4[k].length - 1) : EMPTY, k < v6.length ? v6[k].slice(1, v6[k].length - 1) : EMPTY]
         end
         conds = begin
-          (r["conds"] || []).map { |c| compile_cond(c, sets) }
+          (r["conds"] || []).map { |c| compile_cond(c, sets, action != "skip") }
         rescue StandardError
           next # a malformed rule is dropped, never enforced
         end
@@ -351,9 +472,9 @@ module Camada
         asn_bm: sec[8] || Zeros.new(131_072), asn_extra: sec.fetch(9, EMPTY),
         country: (meta["country"] || []).to_set,
         tls: (meta["tls"] || []).to_set,
-        paths_exact: (meta["pathsExact"] || []).to_set,
-        paths_prefix: (meta["pathsPrefix"] || []).to_set,
-        paths_regex: (meta["pathsRegex"] || []).filter_map { |p| compile_regex(p) },
+        paths_exact: (meta["pathsExact"] || []).to_set { |p| canon_path(p.to_s) },
+        paths_prefix: (meta["pathsPrefix"] || []).to_set { |p| dir_key(p.to_s) },
+        paths_regex: (meta["pathsRegex"] || []).filter_map { |p| compile_regex(p, Regexp::IGNORECASE) },
         allow: range_set(sec.fetch(10, EMPTY), sec.fetch(11, EMPTY), meta["allow"]),
         challenge: range_set(sec.fetch(12, EMPTY), sec.fetch(13, EMPTY), meta["challenge"]),
         rules: compile_rules(meta, rule4, rule6)
