@@ -36,6 +36,25 @@ RSpec.describe Camada::Snapshot::Client do
     expect(c.config).to eq(a.config)
   end
 
+  it "stays cold until the first load is fully published" do
+    # Puma's threads read "not cold" as "rules in place": the first load must not look loaded while
+    # its body is still being parsed (the config is already read by then).
+    parsing = Queue.new
+    release = Queue.new
+    allow(Camada::Snapshot).to receive(:parse_snapshot).and_wrap_original do |orig, *args|
+      parsing << true
+      release.pop
+      orig.call(*args)
+    end
+    c = client(FakeAnalyst.new)
+    load = Thread.new { c.refresh }
+    parsing.pop
+    expect(c.verdict(input(blocked)).reason).to eq("cold")
+    release << true
+    expect(load.join(5)).not_to be_nil
+    expect(c.verdict(input(blocked)).block).to be(true)
+  end
+
   it "repeats the config on 304 and keeps the snapshot" do
     a = FakeAnalyst.new
     c = client(a)
