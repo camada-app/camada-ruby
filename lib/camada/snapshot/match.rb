@@ -43,23 +43,6 @@ module Camada
       end
     end
 
-    def self.clean_path(raw)
-      p = raw.nil? || raw.empty? ? "/" : raw
-      q = p.index("?")
-      q.nil? ? p : p[0, q]
-    end
-
-    # Walks every '/'-terminated ancestor of `path`, the way the block side does.
-    def self.prefix_hit?(prefixes, path)
-      i = path.index("/", 1)
-      until i.nil?
-        return true if prefixes.include?(path[0, i + 1])
-
-        i = path.index("/", i + 1)
-      end
-      false
-    end
-
     # A rule decided this request (§D3): at most one of allowed / block / challenge / warn is
     # true, `reason` is 'rule', and `rule` names the id the adapters stamp on the event.
     def self.rule_result(rule, version)
@@ -89,20 +72,21 @@ module Camada
             n4 = IpParse.parse_ip4(ip)
           end
         end
+        forms = Snapshot.path_forms(i.path) # [raw, lit, full]: contracts §D3 "Path matching"
         unless s.rules.empty?
           r = RuleRequest.new(n4: n4, ip6: w, asn: i.asn, country: i.country, tlsx: i.tlsx,
-                              path: Snapshot.clean_path(i.path), ua: i.ua, header: i.header)
+                              paths: forms, ua: i.ua, header: i.header)
           s.rules.each do |rule| # the order IS the precedence (§A4): first match wins
             return Snapshot.rule_result(rule, s.version) if rule.conds.all? { |cond| cond.call(r) }
           end
         end
-        reason = side(s.allow, i, n4, w)
+        reason = side(s.allow, i, n4, w, forms, false) # an exemption: every canonical spelling must agree
         return MatchResult.new(allowed: true, reason: reason, version: s.version) if reason
 
-        reason = block_side(i, n4, w)
+        reason = block_side(i, n4, w, forms)
         return MatchResult.new(block: true, reason: reason, version: s.version) if reason
 
-        reason = side(s.challenge, i, n4, w)
+        reason = side(s.challenge, i, n4, w, forms, true)
         return MatchResult.new(challenge: true, reason: reason, version: s.version) if reason
 
         MatchResult.new(version: s.version)
@@ -178,23 +162,16 @@ module Camada
         false
       end
 
-      def blocked_path?(path)
-        s = @snap
-        return true if s.paths_exact.include?(path)
-        return true if !s.paths_prefix.empty? && Snapshot.prefix_hit?(s.paths_prefix, path)
-
-        s.paths_regex.any? { |rx| Snapshot.regex_hit?(rx, path) }
-      end
-
       # The block side: v3 sections plus the top-level meta.
-      def block_side(i, n4, w)
+      def block_side(i, n4, w, forms)
         s = @snap
         return "ip4" if n4 >= 0 && blocked4?(n4)
         return "ip6" if !w.nil? && blocked6?(w)
         return "asn" if !i.asn.nil? && blocked_asn?(i.asn)
         return "country" if Camada.present(i.country) && !s.country.empty? && s.country.include?(i.country)
         return "tls" if Camada.present(i.tlsx) && s.tls.include?(i.tlsx)
-        if (!s.paths_exact.empty? || !s.paths_prefix.empty? || !s.paths_regex.empty?) && blocked_path?(Snapshot.clean_path(i.path))
+        if (!s.paths_exact.empty? || !s.paths_prefix.empty? || !s.paths_regex.empty?) &&
+           Snapshot.path_hit?(forms, true) { |p| Snapshot.path_in?(s, p, s.paths_regex) }
           return "path"
         end
 
@@ -202,18 +179,17 @@ module Camada
       end
 
       # A v4 side list (allow or challenge). No tls axis: §A3's side meta has no tls key.
-      def side(st, i, n4, w)
+      def side(st, i, n4, w, forms, deny)
         return nil if st.empty # the common v3 snapshot
         return "ip4" if n4 >= 0 && Snapshot.in_range4?(st.r4, n4)
         return "ip6" if !w.nil? && Snapshot.in_range6?(st.r6, st.n6, w)
         return "asn" if !i.asn.nil? && st.asn.include?(i.asn)
         return "country" if Camada.present(i.country) && st.country.include?(i.country)
 
-        if !st.paths_exact.empty? || !st.paths_prefix.empty?
-          p = Snapshot.clean_path(i.path)
-          return "path" if st.paths_exact.include?(p)
-          return "path" if !st.paths_prefix.empty? && Snapshot.prefix_hit?(st.paths_prefix, p)
+        if (!st.paths_exact.empty? || !st.paths_prefix.empty?) && Snapshot.path_hit?(forms, deny) { |p| Snapshot.path_in?(st, p) }
+          return "path"
         end
+
         nil
       end
     end
