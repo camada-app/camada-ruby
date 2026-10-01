@@ -143,6 +143,18 @@ RSpec.describe Camada::Rack do
     expect(a.all_events.map { |e| e.values_at("p", "st") }).to eq([["/stream", 200]])
   end
 
+  it "puts no x-rid on a 101 handshake, whose rid rides the event" do
+    app = ->(_env) { [101, { "upgrade" => "websocket", "rack.hijack" => lambda(&:close) }, []] }
+    status, headers, body = described_class.new(app, engine).call({ "REQUEST_METHOD" => "GET", "PATH_INFO" => "/ws", "REMOTE_ADDR" => Host::PEER })
+    body.close
+    expect(status).to eq(101)
+    expect(headers).not_to have_key("x-rid")
+    engine.queue.flush
+    ev = a.all_events.last
+    expect(ev.values_at("p", "st")).to eq(["/ws", 101])
+    expect(ev["rid"]).to be_a(String)
+  end
+
   it "closes the app body exactly once and fires on_finish once" do
     closes = []
     body_class = Class.new do

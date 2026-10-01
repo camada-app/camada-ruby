@@ -165,7 +165,7 @@ module Camada
         passed.on_finish&.call(500)
         raise
       end
-      headers = stamp(headers, passed)
+      headers = stamp(status, headers, passed)
       finish = passed.on_finish
       return [status, headers, body] if finish.nil?
 
@@ -176,13 +176,14 @@ module Camada
       [status, headers, proxy]
     end
 
-    # x-rid and the session cookie on the app's response. Rack 3 spells header names in lower
+    # x-rid and the session cookie on the app's response; no x-rid on a 101 (a partial-hijack
+    # websocket handshake), whose rid rides the event alone. Rack 3 spells header names in lower
     # case and carries several set-cookie values as an Array; Rack 2 joins them with "\n".
-    def stamp(headers, passed)
+    def stamp(status, headers, passed)
       return headers if passed.rid.nil? && passed.set_cookie.nil?
 
       headers = headers.to_h
-      headers["x-rid"] = passed.rid if passed.rid
+      headers["x-rid"] = passed.rid if passed.rid && status.to_i != 101
       if passed.set_cookie
         key = headers.keys.find { |k| k.to_s.downcase == "set-cookie" } || "set-cookie"
         headers[key] = join_cookies(headers[key], passed.set_cookie)
