@@ -204,6 +204,7 @@ module Camada
       return INERT if disabled? || @snap.nil?
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      ts0 = now_ms # ts is the request start, the moment dur counts from
       @snap.ensure_fresh
       ip = client_ip(req)
 
@@ -265,6 +266,7 @@ module Camada
         next if ctx["challenged"] || excluded || !sampled
 
         ev = event(req, rid, sid, new_session, ip)
+        ev["ts"] = ts0
         ev["st"] = status
         ev["dur"] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).to_i
         ev["rt"] = req.route if req.route

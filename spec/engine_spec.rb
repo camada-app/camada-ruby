@@ -105,6 +105,20 @@ RSpec.describe Camada::Engine do
       expect(ev).not_to have_key("wrn")
     end
 
+    it "stamps ts at the request start, so ts + dur is the response end" do
+      h = site(handler: lambda { |_env|
+        sleep 0.2
+        [200, {}, ["ok"]]
+      })
+      start = (Time.now.to_f * 1000).to_i
+      h.call("GET", "/slow")
+      finish = (Time.now.to_f * 1000).to_i
+      ev, = h.events
+      expect(ev["dur"]).to be >= 200
+      expect(ev["ts"]).to be_between(start, start + 100) # not one dur later
+      expect(ev["ts"] + ev["dur"]).to be_within(100).of(finish)
+    end
+
     it "reads Puma's binary env strings as UTF-8, so a stray byte neither escapes a rule nor costs the batch" do
       h = site
       binary = [["user-agent", "x\xff".b], ["accept", "*/*"]]
