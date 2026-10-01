@@ -83,11 +83,11 @@ use Camada::Rack, engine
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, vendored) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
    fall through to your app when the tenant switched the beacon off.
-6. Runs your app with `x-rid` and the `_sfp` session cookie on its response, and when the server
-   closes the response body ships one redacted event: method, host, path, scrubbed query, status,
-   latency, header names/sizes/order, the auth scheme (never the credential), cookie count (never
-   values), the matched route pattern when the framework names it (`sinatra.route`, Rails'
-   `route_uri_pattern`). An exception in your app ships as `st: 500` and propagates unchanged.
+6. Runs your app with `x-rid` (the rid of the request's event row; never on a 101 handshake) and
+   the `_sfp` session cookie on its response, and when the server closes the response body ships
+   one redacted event: method, host, path, scrubbed query, status, latency, header
+   names/sizes/order, the auth scheme (never the credential), cookie count (never values), the
+   matched route pattern when the framework names it (`sinatra.route`, Rails' `route_uri_pattern`). An exception in your app ships as `st: 500` and propagates unchanged.
 
 ## Options
 
