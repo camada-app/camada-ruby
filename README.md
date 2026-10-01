@@ -8,7 +8,7 @@ a Railtie that mounts it for Rails — the `sentry-ruby` model. Fails open by de
 outage or bug never 5xxes your app.
 
 Not yet on RubyGems — install it from a sibling checkout: `gem "camada", path: "../camada-ruby"`
-in your Gemfile (as [`camada-ruby-example`](../camada-ruby-example) does); publishing is one
+in your Gemfile (as [`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) does); publishing is one
 decision with the npm packages (SDK-G01). Ruby 3.1 or newer, no runtime dependencies (stdlib
 only: `net/http`, `openssl`, `digest`, `json`, `securerandom`, `zlib`, `stringio`).
 
@@ -23,7 +23,7 @@ run App
 # Rails — nothing to add: the Railtie inserts Camada::Rack at the top of the middleware stack
 ```
 
-Env (printed by camada onboarding / `npm run seed` in dev):
+Env (the key is printed once when you create a project in the app):
 
 ```
 CAMADA_KEY=<ingest_token>.<snap_token>
@@ -194,6 +194,6 @@ vendored beacon to `camada-browser/dist/auto.global.js` (`npm run build` there f
 `ruby scripts/sync_beacon.rb` after a beacon release). Both fail by name when the checkout is
 missing rather than skipping (`CAMADA_FIXTURES_DIR`, `CAMADA_BROWSER_DIST` override the paths).
 
-[`camada-ruby-example`](../camada-ruby-example) is the hand-test bench (Sinatra under Puma on
+[`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) is the hand-test bench (Sinatra under Puma on
 :3004), and `node scripts/e2e-sdk-ruby.mjs` in `camada/edge-analyst` drives it against a seeded
 local analyst over real HTTP, cold first request included.
