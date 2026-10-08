@@ -23,6 +23,21 @@ module Camada
     # Process.pid with the pid that built the client and starts over in a forked worker.
     COLD = MatchResult.new(reason: "cold") # never loaded yet: fail open, mirrors the collector
     NONE = MatchResult.new
+    POLL_FLOOR_S = 5.0
+
+    # Seconds to wait before the next self-initiated poll after a poll answered `status`, or nil
+    # when the answer was 200/204/304 (not paced: the normal cadence governs). A Retry-After in
+    # delta-seconds is honoured, floored at 5 s and capped at the current cadence (the cap wins).
+    # HTTP-dates and anything else that is not all digits read as absent (edge-analyst only sends
+    # delta-seconds). status 0 = no answer. Internal.
+    def self.next_poll_delay(status, retry_after, refresh_s)
+      return nil if [200, 204, 304].include?(status)
+
+      ra = retry_after.to_s.gsub(/\A[ \t]+|[ \t]+\z/, "")
+      secs = ra.match?(/\A[0-9]+\z/) ? [ra.to_i, 1_000_000_000].min : 0 # overflow reads as huge, not invalid
+      cap = [refresh_s.to_f, 0.0].max
+      [[secs, POLL_FLOOR_S].max, cap].min.to_f # rubocop:disable Style/ComparableClamp -- not #clamp: it raises when the cap is under the floor
+    end
 
     class Client
       attr_accessor :transport
@@ -46,6 +61,7 @@ module Camada
         @pinned = !refresh_s.nil?
         @etag = nil
         @loaded_at = nil
+        @not_before = 0.0 # a failed poll gates the next self-initiated one until this monotonic time
         fresh_state!
       end
 
@@ -81,30 +97,20 @@ module Camada
         @loaded_at.nil? || monotonic - @loaded_at > @refresh_s * 0.9
       end
 
-      # Kicks a refresh when stale; never blocks the request path, never raises.
+      # Kicks a refresh when due; never blocks the request path, never raises.
       def ensure_fresh
         check_fork!
-        return if !stale? || @loading.locked?
+        return if !due? || @loading.locked?
 
-        t = Thread.new { refresh }
+        t = Thread.new { refresh_if_due }
         t.name = "camada-snapshot-load"
         t.report_on_exception = false
         nil
       end
 
-      # One synchronous poll (single in-flight): what the threads call, and what tests and warm-ups call directly.
+      # One synchronous poll (single in-flight): what tests and warm-ups call directly, ignoring the gate.
       def refresh
-        check_fork!
-        lock = @loading # bound once: after_fork! swaps the attribute
-        return unless lock.try_lock
-
-        begin
-          load_once
-        rescue StandardError => e # a poll that can never succeed must not be silent, nor fatal
-          Guarded.log_rate_limited(e)
-        ensure
-          lock.unlock
-        end
+        poll { true }
       end
 
       # Cold (never loaded) and no-snapshot both fail open, mirroring the edge collector.
@@ -116,6 +122,37 @@ module Camada
       end
 
       private
+
+      # What the background kick calls: take the slot, then re-check, so a second kick that lost the
+      # race to a poll that has just finished (and gated the next one) does nothing.
+      def refresh_if_due
+        poll { due? }
+      end
+
+      # Stale and past the failure gate: what every self-initiated poll (request path, timer tick)
+      # asks. A gate further away than one cadence means the clock stepped; treat it as open.
+      def due?
+        return false unless stale?
+
+        now = monotonic
+        @not_before <= now || @not_before - now > @refresh_s
+      end
+
+      def poll
+        check_fork!
+        lock = @loading # bound once: after_fork! swaps the attribute
+        return unless lock.try_lock
+
+        begin
+          return unless yield
+
+          load_once
+        rescue StandardError => e # a poll that can never succeed must not be silent, nor fatal
+          Guarded.log_rate_limited(e)
+        ensure
+          lock.unlock
+        end
+      end
 
       def fresh_state!
         @pid = Process.pid
@@ -150,8 +187,18 @@ module Camada
         headers["x-camada-sdk"] = @sdk if @sdk
         # a tenant without that container is answered with the next one down
         headers["x-camada-snapshot"] = @snapshot_version.to_s if @snapshot_version > 3
-        res = @transport.call(HttpRequest.new(method: "GET", url: @url, headers: headers, body: nil, timeout_s: @timeout_s))
-        return unless [200, 204, 304].include?(res.status) # 401/5xx/network: keep what we have
+        res = begin
+          @transport.call(HttpRequest.new(method: "GET", url: @url, headers: headers, body: nil, timeout_s: @timeout_s))
+        rescue StandardError => e
+          Guarded.log_rate_limited(e) # still logged (rate-limited), and gated below as status 0
+          HttpResponse.new(status: 0, headers: {}, body: "".b) # a transport that raises is no answer
+        end
+        delay = Snapshot.next_poll_delay(res.status, res.headers["retry-after"], @refresh_s)
+        unless delay.nil? # 401/5xx/network: keep what we have (cold stays cold) and back off
+          @not_before = monotonic + delay # written before the slot is released
+          return
+        end
+        @not_before = 0.0
 
         # loaded_at is stamped last (even when the body turns out corrupt): "not cold" is what Puma's
         # request threads read as "rules in place", so it must not be visible before the matcher and
