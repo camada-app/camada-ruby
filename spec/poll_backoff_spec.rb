@@ -33,7 +33,7 @@ RSpec.describe "snapshot poll pacing" do
         tl["steps"].each do |st|
           now = tl["clockBase"] + st["t"]
           label = "#{tl["name"]} @ t=#{st["t"]}"
-          expect(c.due?).to eq(st["poll"]), label
+          expect(c.send(:due?)).to eq(st["poll"]), label
           next unless st["poll"]
 
           r = st["respond"]
@@ -54,15 +54,81 @@ RSpec.describe "snapshot poll pacing" do
       Camada::Snapshot::Client.new("https://analyst.test/snapshot", "snap-test", transport: a, mode: :lazy, **kw)
     end
 
-    it "does not poll when it is no longer due after taking the slot" do
+    def join_loads = Thread.list.select { |t| t.name == "camada-snapshot-load" }.each { |t| t.join(5) }
+
+    it "does not poll when it is stale but gated once the slot is taken" do
       a = FakeAnalyst.new
-      c = client(a, refresh_s: 30)
+      c = client(a, refresh_s: 60)
+      now = 1000.0
+      allow(c).to receive(:monotonic) { now }
       c.refresh
+      now += 100 # stale
+      a.snapshot_status = 503
+      a.snapshot_retry_after = "30"
+      c.refresh # gates the next poll until now + 30
       n = a.snapshot_requests.size
-      allow(c).to receive(:due?).and_return(true, false) # due when kicked, fresh once the slot is taken
-      c.ensure_fresh
-      Thread.list.select { |t| t.name == "camada-snapshot-load" }.each { |t| t.join(5) }
+      expect(c.stale?).to be(true)
+      expect(c.send(:due?)).to be(false)
+      c.refresh_if_due # what the kick runs after taking the slot
       expect(a.snapshot_requests.size).to eq(n)
+    end
+
+    it "the request path honours a closed gate" do
+      a = FakeAnalyst.new
+      c = client(a, refresh_s: 60)
+      now = 1000.0
+      allow(c).to receive(:monotonic) { now }
+      c.refresh
+      now += 100 # stale
+      a.snapshot_status = 503
+      a.snapshot_retry_after = "30"
+      n = a.snapshot_requests.size
+      6.times do
+        c.ensure_fresh
+        join_loads
+      end
+      expect(a.snapshot_requests.size).to eq(n + 1)
+      now += 30
+      c.ensure_fresh
+      join_loads
+      expect(a.snapshot_requests.size).to eq(n + 2)
+    end
+  end
+
+  describe "a transport that raises" do
+    it "is logged (rate-limited) and still gated as status 0" do
+      lines = []
+      Camada::Guarded.logger = ->(s) { lines << s }
+      Camada::Guarded.instance_variable_set(:@last_log, nil)
+      calls = 0
+      boom = lambda do |_req|
+        calls += 1
+        raise IOError, "socket exploded"
+      end
+      c = Camada::Snapshot::Client.new("https://analyst.test/snapshot", "snap-test", transport: boom, mode: :lazy,
+                                                                                     refresh_s: 60)
+      now = 1000.0
+      allow(c).to receive(:monotonic) { now }
+      begin
+        c.refresh
+        c.refresh_if_due
+        c.refresh # forced polls: a second log line is rate-limited away
+      ensure
+        Camada::Guarded.logger = nil
+      end
+      expect(lines.size).to eq(1)
+      expect(lines[0]).to include("IOError: socket exploded")
+      expect(c.verdict(Camada::Snapshot::MatchInput.new(ip: "1.1.1.1")).reason).to eq("cold")
+      expect(c.send(:due?)).to be(false) # gated
+      expect(calls).to eq(2) # refresh + refresh (refresh_if_due was gated, did not call)
+    end
+  end
+
+  describe "an unreadable gzip body" do
+    it "is no answer: status 0 and no headers, so retry-after is not honoured" do
+      r = Camada::Transport.response(503, { "content-encoding" => "gzip", "retry-after" => "30" }, "not gzip".b)
+      expect(r.status).to eq(0)
+      expect(r.headers).to eq({})
     end
   end
 end

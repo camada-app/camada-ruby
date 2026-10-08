@@ -176,7 +176,9 @@ here (and never raises), while it does at the edge.
 
 Every entry point runs inside the fail-open envelope: a dead ingest drops telemetry (logged at
 most once a minute, one line, no backtrace), a corrupt snapshot keeps the previous one, a bug in
-the gem costs the request its join, never its response. `CAMADA_DISABLED=1` bypasses everything.
+the gem costs the request its join, never its response. A failed snapshot poll (401, 5xx, no
+answer) keeps the rules in place and paces the next one: `Retry-After` in seconds is honoured,
+floored at 5 s and capped at the refresh interval. `CAMADA_DISABLED=1` bypasses everything.
 
 ## Development
 
