@@ -42,7 +42,7 @@ module Camada
     end
 
     def self.response(status, headers, body)
-      if headers["content-encoding"].to_s.downcase == "gzip"
+      if !body.empty? && headers["content-encoding"].to_s.downcase == "gzip"
         begin
           body = Zlib::GzipReader.new(StringIO.new(body)).read.b
         rescue StandardError
