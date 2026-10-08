@@ -69,7 +69,7 @@ RSpec.describe "snapshot poll pacing" do
       n = a.snapshot_requests.size
       expect(c.stale?).to be(true)
       expect(c.send(:due?)).to be(false)
-      c.refresh_if_due # what the kick runs after taking the slot
+      c.send(:refresh_if_due) # what the kick runs after taking the slot
       expect(a.snapshot_requests.size).to eq(n)
     end
 
@@ -111,7 +111,7 @@ RSpec.describe "snapshot poll pacing" do
       allow(c).to receive(:monotonic) { now }
       begin
         c.refresh
-        c.refresh_if_due
+        c.send(:refresh_if_due)
         c.refresh # forced polls: a second log line is rate-limited away
       ensure
         Camada::Guarded.logger = nil
@@ -129,6 +129,34 @@ RSpec.describe "snapshot poll pacing" do
       r = Camada::Transport.response(503, { "content-encoding" => "gzip", "retry-after" => "30" }, "not gzip".b)
       expect(r.status).to eq(0)
       expect(r.headers).to eq({})
+    end
+  end
+
+  describe "an empty body that still carries content-encoding gzip" do
+    it "keeps a 304 with its headers (never decoded)" do
+      r = Camada::Transport.response(304, { "content-encoding" => "gzip", "etag" => '"x"' }, "".b)
+      expect(r.status).to eq(304)
+      expect(r.headers["etag"]).to eq('"x"')
+    end
+
+    it "does not close the gate on a warm client" do
+      a = FakeAnalyst.new
+      gz304 = lambda do |req|
+        r = a.call(req)
+        next r unless r.status == 304
+
+        Camada::Transport.response(304, r.headers.merge("content-encoding" => "gzip"), "".b)
+      end
+      c = Camada::Snapshot::Client.new("https://analyst.test/snapshot", "snap-test", transport: gz304, mode: :lazy,
+                                                                                     refresh_s: 30)
+      now = 1000.0
+      allow(c).to receive(:monotonic) { now }
+      c.refresh
+      now = 1028.0
+      c.refresh # healthy 304
+      expect(c.send(:due?)).to be(false)
+      now = 1034.0
+      expect(c.send(:due?)).to be(false) # a failed poll (5 s gate, still stale) would be due by now
     end
   end
 end

@@ -113,12 +113,6 @@ module Camada
         poll { true }
       end
 
-      # What the background kick calls: take the slot, then re-check, so a second kick that lost the
-      # race to a poll that has just finished (and gated the next one) does nothing.
-      def refresh_if_due
-        poll { due? }
-      end
-
       # Cold (never loaded) and no-snapshot both fail open, mirroring the edge collector.
       def verdict(i)
         return COLD if @loaded_at.nil?
@@ -128,6 +122,12 @@ module Camada
       end
 
       private
+
+      # What the background kick calls: take the slot, then re-check, so a second kick that lost the
+      # race to a poll that has just finished (and gated the next one) does nothing.
+      def refresh_if_due
+        poll { due? }
+      end
 
       # Stale and past the failure gate: what every self-initiated poll (request path, timer tick)
       # asks. A gate further away than one cadence means the clock stepped; treat it as open.
