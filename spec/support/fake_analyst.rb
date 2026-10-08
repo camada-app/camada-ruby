@@ -36,7 +36,7 @@ class FakeAnalyst
     io.string
   end
 
-  attr_accessor :config, :snapshot_down, :ingest_down, :snapshot_status, :container, :gzip, :ingest_status
+  attr_accessor :snapshot_retry_after, :config, :snapshot_down, :ingest_down, :snapshot_status, :container, :gzip, :ingest_status
   attr_reader :events, :sdk_headers, :snapshot_versions, :snapshot_requests
 
   def initialize
@@ -74,6 +74,7 @@ class FakeAnalyst
       return Camada::HttpResponse.new(status: 0, headers: {}, body: "".b) if @snapshot_down
 
       headers = { "x-camada-config" => JSON.generate(@config), "cache-control" => "private, no-store" }
+      headers["retry-after"] = @snapshot_retry_after if @snapshot_retry_after
       return Camada::HttpResponse.new(status: @snapshot_status, headers: headers, body: "".b) if @snapshot_status
       return Camada::HttpResponse.new(status: 304, headers: headers, body: "".b) if req.headers["if-none-match"] == etag
 
