@@ -33,10 +33,10 @@ module Camada
     def self.next_poll_delay(status, retry_after, refresh_s)
       return nil if [200, 204, 304].include?(status)
 
-      ra = retry_after.to_s.delete_prefix("").gsub(/\A[ \t]+|[ \t]+\z/, "")
+      ra = retry_after.to_s.gsub(/\A[ \t]+|[ \t]+\z/, "")
       secs = ra.match?(/\A[0-9]+\z/) ? [ra.to_i, 1_000_000_000].min : 0 # overflow reads as huge, not invalid
       cap = [refresh_s.to_f, 0.0].max
-      secs.to_f.clamp(POLL_FLOOR_S, [cap, POLL_FLOOR_S].max).then { |d| [d, cap].min }
+      [[secs, POLL_FLOOR_S].max, cap].min.to_f # rubocop:disable Style/ComparableClamp -- not #clamp: it raises when the cap is under the floor
     end
 
     class Client
@@ -97,15 +97,6 @@ module Camada
         @loaded_at.nil? || monotonic - @loaded_at > @refresh_s * 0.9
       end
 
-      # Stale and past the failure gate: what every self-initiated poll (request path, timer tick)
-      # asks. A gate further away than one cadence means the clock stepped; treat it as open.
-      def due?
-        return false unless stale?
-
-        now = monotonic
-        @not_before <= now || @not_before - now > @refresh_s
-      end
-
       # Kicks a refresh when due; never blocks the request path, never raises.
       def ensure_fresh
         check_fork!
@@ -137,6 +128,15 @@ module Camada
       end
 
       private
+
+      # Stale and past the failure gate: what every self-initiated poll (request path, timer tick)
+      # asks. A gate further away than one cadence means the clock stepped; treat it as open.
+      def due?
+        return false unless stale?
+
+        now = monotonic
+        @not_before <= now || @not_before - now > @refresh_s
+      end
 
       def poll
         check_fork!
@@ -189,7 +189,8 @@ module Camada
         headers["x-camada-snapshot"] = @snapshot_version.to_s if @snapshot_version > 3
         res = begin
           @transport.call(HttpRequest.new(method: "GET", url: @url, headers: headers, body: nil, timeout_s: @timeout_s))
-        rescue StandardError
+        rescue StandardError => e
+          Guarded.log_rate_limited(e) # still logged (rate-limited), and gated below as status 0
           HttpResponse.new(status: 0, headers: {}, body: "".b) # a transport that raises is no answer
         end
         delay = Snapshot.next_poll_delay(res.status, res.headers["retry-after"], @refresh_s)
