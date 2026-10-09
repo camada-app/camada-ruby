@@ -381,7 +381,8 @@ RSpec.describe Camada::Engine do
       pair = cookie.split(";")[0]
       expect(h.call("GET", "/back", headers: [*Host::HTML, ["cookie", pair]], peer: challenged).status).to eq(200)
       expect(h.call("GET", "/back", headers: [*Host::HTML, ["cookie", pair]], peer: "192.0.2.21").status).to eq(200) # not challenged at all
-      forged = "_cch=#{pair[5..].sub("0", "1")}"
+      value = pair[5..]
+      forged = "_cch=#{value[0...-1]}#{value[-1] == "0" ? "1" : "0"}" # always differs: flips the last signature char
       expect(h.call("GET", "/back", headers: [*Host::HTML, ["cookie", forged]], peer: challenged).status).to eq(403)
     end
 
