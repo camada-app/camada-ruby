@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require "json"
 require "openssl"
 
 module Camada
@@ -82,9 +81,6 @@ module Camada
     def self.escape_attr(s)
       s.gsub("&", "&amp;").gsub("<", "&lt;").gsub(">", "&gt;").gsub('"', "&quot;").gsub("'", "&#39;")
     end
-
-    # Safe to drop inside an inline <script>: `<` is escaped so no value can close the element early.
-    def self.escape_script(s) = JSON.generate(s).gsub("<", "\\u003c")
 
     # application/x-www-form-urlencoded, last value wins. Never raises on junk: an invalid
     # %-escape is kept as is, invalid UTF-8 is replaced.

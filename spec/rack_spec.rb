@@ -30,6 +30,22 @@ RSpec.describe Camada::Rack do
     expect([bin.path, bin.host].map(&:encoding).uniq).to eq([Encoding::UTF_8])
   end
 
+  it "replaces a challenge page's CSP in place, keeping Rack::Headers" do
+    headers = Rack::Headers.new
+    headers["content-type"] = "text/html; charset=utf-8"
+    headers["x-camada-challenge"] = "1"
+    headers["content-security-policy"] = "script-src 'self'"
+    headers["content-security-policy-report-only"] = "default-src 'self'"
+    out = described_class.new(->(_) {}, engine).send(:own_challenge_csp, headers)
+    expect(out).to be_a(Rack::Headers)
+    expect(out.to_h).to eq({ "content-type" => "text/html; charset=utf-8", "x-camada-challenge" => "1",
+                             "content-security-policy" => Camada::Challenge.challenge_page_csp })
+    plain = { "Content-Type" => "text/html", "X-Camada-Challenge" => "1", "Content-Security-Policy" => "x", "Other" => "y" }
+    expect(described_class.new(->(_) {}, engine).send(:own_challenge_csp, plain)).to eq(
+      { "Content-Type" => "text/html", "X-Camada-Challenge" => "1", "Other" => "y", "content-security-policy" => Camada::Challenge.challenge_page_csp }
+    )
+  end
+
   it "joins repeated headers the way node:http does" do
     req = Camada::Req.new(method: "GET", path: "/", headers: [["cookie", "a=1"], ["cookie", "_sfp=abc"], ["accept", "a"], ["accept", "b"]])
     expect(req.header("cookie")).to eq("a=1; _sfp=abc")
