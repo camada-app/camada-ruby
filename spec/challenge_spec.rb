@@ -112,7 +112,7 @@ RSpec.describe Camada::Challenge do
 
     it "escapes attributes and script values" do
       expect(Camada::Challenge.escape_attr("a<b>&\"c'")).to eq("a&lt;b&gt;&amp;&quot;c&#39;")
-      expect(Camada::Challenge.escape_script("</script>")).to eq('"\\u003c/script>"')
+      expect(Camada::Challenge).not_to respond_to(:escape_script) # the page inlines no value any more (RA-5)
     end
 
     it "splits a token" do
