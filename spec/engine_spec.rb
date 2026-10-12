@@ -341,6 +341,7 @@ RSpec.describe Camada::Engine do
       expect(r.header("content-type")).to eq("text/html; charset=utf-8")
       expect(r.header("x-camada-challenge")).to eq("1")
       expect(r.header("cache-control")).to eq("no-store")
+      expect(r.headers_named("content-security-policy")).to eq([Camada::Challenge.challenge_page_csp]) # camada-all-y38o
       expect(r.body).to include('action="/__camada/challenge"', 'name="to" value="/account?tab=1"')
       expect(h.seen).to eq([])
       ev, = h.events
@@ -426,12 +427,16 @@ RSpec.describe Camada::Engine do
       h = nil
       gated = lambda do |env|
         answer = h.engine.serve_challenge(env["camada"])
-        answer ? [answer.status, answer.headers, [answer.body]] : [200, {}, ["secret page"]]
+        # the app (Rails' content_security_policy, secure_headers) puts a site-wide policy on every response
+        app_csp = { "Content-Security-Policy" => "script-src 'self'", "content-security-policy-report-only" => "default-src 'self'" }
+        answer ? [answer.status, answer.headers.merge(app_csp), [answer.body]] : [200, {}, ["secret page"]]
       end
       h = site(handler: gated)
       r = h.call("GET", "/challenge-me", headers: Host::HTML)
       expect(r.status).to eq(403)
       expect(r.body).to include("camada-f")
+      csp = r.headers.select { |k, _| k.downcase.start_with?("content-security-policy") }.to_a # y38o: replaced, not merged
+      expect(csp).to eq([["content-security-policy", Camada::Challenge.challenge_page_csp]])
       evs = h.events
       expect(evs.length).to eq(1)
       expect(evs[0]["blk"]).to eq("challenge") # one request, one event

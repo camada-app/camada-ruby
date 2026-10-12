@@ -36,6 +36,19 @@ module Camada
       lead + out.join("&")
     end
 
+    # A URL (a Referer) with its query and fragment run through scrub_query (camada-all-ijsa); the scheme, host and
+    # path are kept as they are. The path is left alone on purpose: it gets the same treatment as the request's own
+    # path `p` (none). A same-origin Referer's path already shipped as `p` on that page's own event, and a
+    # cross-origin one carries only the origin under the browsers' default Referrer-Policy.
+    def self.scrub_url(url)
+      return nil if url.nil?
+
+      head, hash, frag = url.partition("#")
+      path, q, query = head.partition("?")
+      scrubbed = q.empty? ? head : path + scrub_query(q + query)
+      hash.empty? ? scrubbed : "#{scrubbed}##{scrub_query(frag)}"
+    end
+
     # Body shape only: field names and byte sizes, never values. One level deep.
     def self.body_shape(obj)
       return nil unless obj.is_a?(Hash)

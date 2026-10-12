@@ -32,4 +32,18 @@ RSpec.describe Camada::Redact do
     expect(described_class.hash_user_id("alice@example.com", "tok")).to eq(expected)
     expect(described_class.hash_user_id("x", "tok").length).to eq(32)
   end
+
+  it "scrubs a url's query and fragment but not its path" do
+    # camada-all-ijsa: the Referer carries the previous page's query (a reset token, an OAuth code)
+    {
+      "https://a.test/reset?token=abc&x=1" => "https://a.test/reset?token=~r&x=1",
+      "https://a.test/cb#access_token=t&n=1" => "https://a.test/cb#access_token=~r&n=1",
+      "https://a.test/p?code=1#code=2" => "https://a.test/p?code=~r#code=~r",
+      "https://a.test/p?a=1#x?token=2" => "https://a.test/p?a=1#x?token=~r", # the first # ends the query
+      "https://a.test/reset/abc123" => "https://a.test/reset/abc123",
+      "https://a.test/p?" => "https://a.test/p?",
+      "" => ""
+    }.each { |url, want| expect(described_class.scrub_url(url)).to eq(want), url }
+    expect(described_class.scrub_url(nil)).to be_nil
+  end
 end

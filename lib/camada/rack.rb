@@ -127,6 +127,8 @@ module Camada
       sinatra&.to_s&.sub(/\A[A-Z]+ /, "")
     end
 
+    CSP_HEADERS = %w[content-security-policy content-security-policy-report-only].freeze
+
     # `Camada::Rack.new(app)` wires the lazy default from the environment on the first request;
     # `Camada::Rack.new(app, engine)` uses the one you built.
     def initialize(app, engine = nil, **opts)
@@ -166,6 +168,7 @@ module Camada
         raise
       end
       headers = stamp(status, headers, passed)
+      headers = own_challenge_csp(headers) if passed.ctx && passed.ctx["challenged"]
       finish = passed.on_finish
       return [status, headers, body] if finish.nil?
 
@@ -189,6 +192,22 @@ module Camada
         headers[key] = join_cookies(headers[key], passed.set_cookie)
       end
       headers
+    rescue StandardError => e
+      Guarded.log_rate_limited(e)
+      headers
+    end
+
+    # A challenge page the app returned (serve_challenge) keeps its own CSP: a policy the app or its middleware put on
+    # that response (Rails' content_security_policy, secure_headers) is dropped and the page's is set, or the solver
+    # would be blocked (camada-all-y38o). Any other response comes back unchanged.
+    def own_challenge_csp(headers)
+      h = headers.to_h
+      value = ->(name) { Array(h.find { |k, _| k.to_s.downcase == name }&.last).first.to_s }
+      return headers unless value.call("x-camada-challenge") == "1" && value.call("content-type").start_with?("text/html")
+
+      h = h.reject { |k, _| CSP_HEADERS.include?(k.to_s.downcase) }
+      h["content-security-policy"] = Challenge.challenge_page_csp
+      h
     rescue StandardError => e
       Guarded.log_rate_limited(e)
       headers
