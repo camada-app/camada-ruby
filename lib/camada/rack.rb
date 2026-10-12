@@ -200,14 +200,14 @@ module Camada
     # A challenge page the app returned (serve_challenge) keeps its own CSP: a policy the app or its middleware put on
     # that response (Rails' content_security_policy, secure_headers) is dropped and the page's is set, or the solver
     # would be blocked (camada-all-y38o). Any other response comes back unchanged.
+    # The headers are changed in place, so a Rack::Headers (or any Hash subclass) keeps its class.
     def own_challenge_csp(headers)
-      h = headers.to_h
-      value = ->(name) { Array(h.find { |k, _| k.to_s.downcase == name }&.last).first.to_s }
+      value = ->(name) { Array(headers.find { |k, _| k.to_s.downcase == name }&.last).first.to_s }
       return headers unless value.call("x-camada-challenge") == "1" && value.call("content-type").start_with?("text/html")
 
-      h = h.reject { |k, _| CSP_HEADERS.include?(k.to_s.downcase) }
-      h["content-security-policy"] = Challenge.challenge_page_csp
-      h
+      headers.delete_if { |k, _| CSP_HEADERS.include?(k.to_s.downcase) }
+      headers["content-security-policy"] = Challenge.challenge_page_csp
+      headers
     rescue StandardError => e
       Guarded.log_rate_limited(e)
       headers

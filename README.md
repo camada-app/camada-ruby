@@ -82,6 +82,13 @@ use Camada::Rack, engine
    absent `REMOTE_ADDR` (Puma or Unicorn bound to a unix socket path) means no peer: the walk then
    runs over `X-Forwarded-For` alone and trusts your network edge, so the app must not be reachable
    around it.
+
+   **Servers that rewrite the peer from a forwarded header.** camada needs the real socket peer in
+   `REMOTE_ADDR`. Puma's `set_remote_address header: "X-Forwarded-For"` replaces it with the leftmost
+   `X-Forwarded-For` entry, which the client wrote. camada then takes that forged value as the peer,
+   and so as the client ip. Leave Puma's default (`set_remote_address :socket`, the real peer) and
+   declare your proxy as camada's trusted proxy instead. A Rack middleware that rewrites
+   `REMOTE_ADDR` must sit inside camada (after it in the stack), so camada reads the address first.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule

@@ -394,6 +394,7 @@ RSpec.describe Camada::Engine do
       expect(r.status).to eq(403)
       expect(r.header("set-cookie")).to be_nil
       expect(r.body).to include("camada-f")
+      expect(r.headers_named("content-security-policy")).to eq([Camada::Challenge.challenge_page_csp]) # the re-served page keeps its own policy
       forged = "f" * 32
       r = h.call("POST", "/__camada/challenge", body: "nonce=#{forged}&solution=#{solve(forged)}&to=%2F", peer: challenged)
       expect(r.status).to eq(403)
