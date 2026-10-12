@@ -104,10 +104,32 @@ RSpec.describe Camada::Ip do
       expect(resolve("172.64.1.1", "127.0.0.1", cloudflare)).to eq("127.0.0.1")
     end
 
-    it "keeps the plain walk with no peer (or a non-ip one, a unix socket)" do
+    it "keeps the plain walk with no peer (nil or empty)" do
       expect(resolve(nil, "1.2.3.4, 198.51.100.9, 172.64.1.1", cloudflare)).to eq("198.51.100.9")
+      expect(resolve("", "1.2.3.4, 198.51.100.9, 172.64.1.1", cloudflare)).to eq("198.51.100.9")
       expect(resolve(nil, "172.64.1.1", cloudflare)).to be_nil
-      expect(resolve("unix:/run/app.sock", "198.51.100.9, 172.64.1.1", cloudflare)).to eq("198.51.100.9")
     end
+
+    # C6 v3: a non-empty peer that is not an ip after unmap could not be read: nil, and cidrs never walks for it,
+    # while hops still takes its XFF candidate.
+    it "never walks for an unreadable peer and gives nil" do
+      ["unix:/run/app.sock", "/run/app.sock", "@", "1.2.3.4:5", "fe80::1%eth0", "::ffff:zz", "1.2.3.4 ", "64:ff9b::198.51.100.9"].each do |peer|
+        expect(resolve(peer, "198.51.100.9, 172.64.1.1", cloudflare)).to be_nil, peer
+        expect(resolve(peer, nil, nil)).to be_nil, peer
+        expect(resolve(peer, "198.51.100.9", { "mode" => "hops", "hops" => 1 })).to eq("198.51.100.9"), peer
+      end
+    end
+  end
+
+  it "uses its own v6 grammar, OWS trim and unmap, not the std lib's" do
+    hops1 = { "mode" => "hops", "hops" => 1 }
+    [":8:8:8", "2001:db8::1:", "::1.2.3.4", "::ffff:1.2.3.256", "0:0:0:0:0:ffff:1.2.3.4", ":::", "\u00a0203.0.113.5",
+     "203.0.113.5\r", "[fe80::1%eth0]:80"].each do |bad|
+      expect(resolve("10.0.0.1", bad, hops1)).to eq("10.0.0.1"), bad
+    end
+    expect(resolve("10.0.0.1", "\t::FFFF:203.0.113.5 ", hops1)).to eq("203.0.113.5")
+    expect(resolve("10.0.0.1", "\t::FFFF:203.0.113.5 ", hops1).encoding).to eq(Encoding::UTF_8)
+    expect(resolve("::ffff:7f00:1", "198.51.100.9", { "mode" => "cidrs", "cidrs" => ["172.64.0.0/13"] })).to eq("::ffff:7f00:1")
+    expect(resolve("10.0.0.1", "\xff\xfe, 203.0.113.5".b, hops1)).to eq("203.0.113.5") # never raises on bytes
   end
 end
