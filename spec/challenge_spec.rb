@@ -158,8 +158,9 @@ RSpec.describe Camada::Challenge do
         csp = bits.nil? ? Camada::Challenge.challenge_page_csp : Camada::Challenge.challenge_page_csp(bits)
         script, = inline(page, "script")
         style, = inline(page, "style")
-        expect(csp).to include("script-src #{sha(script)};", "style-src #{sha(style)};", "default-src 'none'", "form-action 'self'")
+        expect(csp).to include("script-src #{sha(script)};", "style-src #{sha(style)};", "default-src 'none'")
         expect(csp).not_to include("unsafe")
+        expect(csp).not_to include("form-action")
       end
     end
 
@@ -178,7 +179,7 @@ RSpec.describe Camada::Challenge do
       # @camada/core challengePageCsp(16) (src/challenge/page.ts): the page is byte-for-byte core's, so the hashes match
       expect(Camada::Challenge.challenge_page_csp).to eq(
         "default-src 'none'; script-src 'sha256-ciEqEwbzJaoB3rni2OdS8TuYa+/yFdFMAkRscUn8z8k='; " \
-        "style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+        "style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; base-uri 'none'; frame-ancestors 'self'"
       )
     end
   end

@@ -119,13 +119,15 @@ module Camada
     def self.sha256_src(text) = "'sha256-#{[OpenSSL::Digest::SHA256.digest(text)].pack("m0")}'"
 
     # The Content-Security-Policy to send with challenge_page(bits:): it allows only the page's own inline script and
-    # style (by 'sha256-...' hash), a form post to the same origin, and nothing else. Send it as the response's only
-    # CSP, removing any Content-Security-Policy or Content-Security-Policy-Report-Only the app set.
+    # style (by 'sha256-...' hash) and nothing else. There is no form-action: browsers apply it to the redirects that
+    # follow the POST too, so an app whose page 302s on to an external sign-in after verify's 302 would be blocked.
+    # Send it as the response's only CSP, removing any Content-Security-Policy or Content-Security-Policy-Report-Only
+    # the app set.
     def self.challenge_page_csp(bits = POW_BITS)
       bits = bits.clamp(1, 32)
       @csp_cache ||= {} # bits -> policy; a racing first fill computes the same string twice, harmlessly
       @csp_cache[bits] ||= "default-src 'none'; script-src #{sha256_src(solver_script(bits))}; " \
-                           "style-src #{sha256_src("\n#{STYLE}")}; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+                           "style-src #{sha256_src("\n#{STYLE}")}; base-uri 'none'; frame-ancestors 'self'"
     end
   end
 end

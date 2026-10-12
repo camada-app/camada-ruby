@@ -72,11 +72,16 @@ use Camada::Rack, engine
    header on its own is never the ip: any caller can set it. **Never `request.ip`**:
    `Rack::Request#ip` trusts `X-Forwarded-For` from anyone, which is exactly the spoof camada
    refuses; the middleware reads `env["REMOTE_ADDR"]` and applies your trusted-proxy rules itself.
-   Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes them).
-   Under `cidrs` (and the dashboard's Cloudflare option, stored as `cidrs`) the socket peer must
-   itself be one of the trusted ranges or a loopback address (a local front end or sidecar);
-   otherwise the peer is the client and `X-Forwarded-For` is ignored, so a direct hit on your origin
-   cannot pick its own ip. A host that reports no peer (or a unix socket) keeps the plain walk.
+   Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes them) or
+   the `::ffff:a.b.c.d` form, and are trimmed of spaces and tabs only. The resolved ip is always a
+   valid address or none. Under `cidrs` (and the dashboard's Cloudflare option, stored as `cidrs`)
+   the socket peer must itself be one of the trusted ranges or a loopback address (a local front end
+   or sidecar); otherwise the peer is the client and `X-Forwarded-For` is ignored, so a direct hit on
+   your origin cannot pick its own ip. A `REMOTE_ADDR` that is not an ip (a socket path, `ip:port`)
+   could not be read: the ip is then none and `X-Forwarded-For` is never walked. Only an empty or
+   absent `REMOTE_ADDR` (Puma or Unicorn bound to a unix socket path) means no peer: the walk then
+   runs over `X-Forwarded-For` alone and trusts your network edge, so the app must not be reachable
+   around it.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
@@ -85,8 +90,8 @@ use Camada::Rack, engine
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (or 403 JSON for a
    non-HTML request); `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
    ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
-   carries its own `Content-Security-Policy` (its inline solver and style by hash, `form-action
-   'self'`) and replaces any policy your app set on it (Rails' `content_security_policy`,
+   carries its own `Content-Security-Policy` (its inline solver and style by hash, nothing else)
+   and replaces any policy your app set on it (Rails' `content_security_policy`,
    `secure_headers`), so a strict site CSP cannot block it.
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, vendored) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
