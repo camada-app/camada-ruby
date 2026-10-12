@@ -233,4 +233,20 @@ RSpec.describe Camada::Rack do
       Camada.reset!
     end
   end
+
+  # C6 v3 peer table: REMOTE_ADDR "" or absent (puma/unicorn bound to a unix socket path) is no peer, so cidrs walks
+  # XFF alone; a non-empty REMOTE_ADDR that is not an ip could not be read, and the ip is nil, never the XFF walk.
+  it "applies the peer rule: unix-socket listener walks, unreadable peer is nil" do
+    cfg = { "mode" => "cidrs", "cidrs" => ["172.64.0.0/13"] }
+    base = { "REQUEST_METHOD" => "GET", "PATH_INFO" => "/", "HTTP_X_FORWARDED_FOR" => "198.51.100.9, 172.64.1.1" }
+    [base, base.merge("REMOTE_ADDR" => ""), base.merge("REMOTE_ADDR" => "".b)].each do |env|
+      req = described_class.req_from_env(env)
+      expect(req.peer).to be_nil
+      expect(Camada::Ip.resolve_client_ip(req.peer, req.header("x-forwarded-for"), cfg)).to eq("198.51.100.9")
+    end
+    ["/run/app.sock", "unix:/run/app.sock", "@", "1.2.3.4:5"].each do |bad|
+      req = described_class.req_from_env(base.merge("REMOTE_ADDR" => bad.b))
+      expect(Camada::Ip.resolve_client_ip(req.peer, req.header("x-forwarded-for"), cfg)).to be_nil, bad
+    end
+  end
 end

@@ -9,29 +9,77 @@ module Camada
   # credentials, or raw user identifiers (HMAC-hashed here, inside the SDK, before anything
   # reaches the queue). Ported from @camada/core src/redact.ts.
   module Redact
-    NAME_RE = /(pass(word)?|tok(en)?|secret|key|api[-_]?key|auth|sess(ion)?|sig(nature)?|code|jwt|bearer|credential)/i
-    JWT_RE = /\AeyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/
-    HEX_RE = /\A[a-f0-9]{32,}\z/i
-    B64_RE = %r{\A[A-Za-z0-9+/_-]{40,}={0,2}\z}
+    # Exact patterns of C6 v3, matched bytewise on a binary copy (decoding yields any byte; every pattern is ASCII,
+    # so a byte >= 0x80 never matches). Whole-string anchors are \A...\z (Ruby's ^/$ are line anchors). Ruby's /i
+    # folds Unicode (U+212A Kelvin K matches k), so the name test is the lowercase-A-Z-then-substring form and hex
+    # spells out [a-fA-F0-9].
+    NAME_WORDS = %w[pass tok secret key auth sess sig code jwt bearer credential].freeze
+    JWT_RE = /\AeyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}/n # prefix match: anything may follow
+    HEX_RE = /\A[a-fA-F0-9]{32,}\z/n
+    B64_RE = %r{\A[A-Za-z0-9+/_-]{40,}={0,2}\z}n
+    ESC_RE = /%([0-9a-fA-F]{2})/n
 
     REDACT_ALLOWLIST = %w[plan role locale ab_variant].freeze # additions only, never narrowing
 
     def self.suspect_value?(v)
+      v = v.b
       JWT_RE.match?(v) || HEX_RE.match?(v) || B64_RE.match?(v)
     end
 
-    # Replaces credential-looking query values with ~r, preserving structure and order.
+    # core's NAME_RE (`pass(word)?|tok(en)?|secret|key|api[-_]?key|auth|sess(ion)?|sig(nature)?|code|jwt|bearer|
+    # credential`, unanchored, case-insensitive) in its ASCII-only form.
+    def self.name_hit?(n)
+      lower = n.b.tr("A-Z", "a-z")
+      NAME_WORDS.any? { |w| lower.include?(w) }
+    end
+
+    # Percent-decoding that never raises: bytewise, each `%HH` (ASCII hex) becomes that byte, any other `%` stays,
+    # `+` stays. Up to 4 passes, so double (or triple) encoding cannot hide a name or a nested query; text that still
+    # holds a `%HH` after 4 passes returns nil, which the caller scrubs. The cap keeps a crafted `%252525...` linear.
+    # Only ever used to TEST a part; the output keeps the raw text.
+    def self.decode(s)
+      s = s.b
+      4.times do
+        break unless ESC_RE.match?(s)
+
+        s = s.gsub(ESC_RE) { ::Regexp.last_match(1).hex.chr }
+      end
+      ESC_RE.match?(s) ? nil : s
+    end
+
+    # One `name=value` or bare segment of a decoded nested value (no further decoding, no recursion).
+    def self.cred_segment?(seg)
+      eq = seg.index("=")
+      eq.nil? ? suspect_value?(seg) : name_hit?(seg[0, eq]) || suspect_value?(seg[(eq + 1)..])
+    end
+
+    # A decoded value that carries a nested query (`?`, `&` or `=`) is a credential when any of its `[?&]`-separated
+    # segments is one (C6 v3). `q=a=b` or `q=1' or '1'='1` is not; `next=/r?token=x` is.
+    def self.nested_cred?(d)
+      /[?&=]/n.match?(d) && d.split(/[?&]/n, -1).any? { |seg| cred_segment?(seg) }
+    end
+
+    # Replaces credential-looking query parts with ~r, preserving structure and order (C6 v3). The string is split on
+    # `&`, never URL-parsed. Each part's name and value are percent-decoded (decode) before testing; the output keeps
+    # the raw text. `name=value` -> `name=~r` when the name looks like a credential, the value looks like one, or the
+    # value holds a nested query with a credential segment (replaced whole, so payloads like `q=1' or '1'='1` stay
+    # visible to the scorer). A bare part -> `~r` when it looks like a credential value or holds a credential
+    # segment. Either half still encoded after 4 decode passes counts as a credential.
     def self.scrub_query(query)
       return query || "" if query.nil? || query.length <= 1
 
       lead = query.start_with?("?") ? "?" : ""
       out = (lead.empty? ? query : query[1..]).split("&", -1).map do |p|
         eq = p.index("=")
-        next p if eq.nil?
+        if eq.nil?
+          d = decode(p)
+          next d.nil? || suspect_value?(d) || nested_cred?(d) ? "~r" : p
+        end
 
         name = p[0, eq]
-        value = p[(eq + 1)..]
-        NAME_RE.match?(name) || suspect_value?(value) ? "#{name}=~r" : p
+        dn = decode(name)
+        dv = decode(p[(eq + 1)..])
+        dn.nil? || dv.nil? || name_hit?(dn) || suspect_value?(dv) || nested_cred?(dv) ? "#{name}=~r" : p
       end
       lead + out.join("&")
     end
