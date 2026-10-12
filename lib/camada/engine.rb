@@ -212,7 +212,10 @@ module Camada
       # custom rules read the user agent and the request headers (§D3).
       v = @snap.verdict(Snapshot::MatchInput.new(ip: ip, path: req.path, ua: req.header("user-agent"), header: ->(n) { req.header(n) }))
       if v.block
-        headers = { "content-type" => "text/plain", "x-block-reason" => v.reason || "", "x-block-version" => v.version || "" }
+        headers = {
+          "content-type" => "text/plain", "cache-control" => "no-store", # per-visitor: no shared cache keeps it (camada-all-8lp6)
+          "x-block-reason" => v.reason || "", "x-block-version" => v.version || ""
+        }
         headers["x-block-rule"] = v.rule if v.rule # a custom rule blocked: name it, so the customer knows which row to edit
         ev = event(req, SecureRandom.uuid, nil, false, ip)
         ev["st"] = 403       # blocked requests always ship: silent expiry makes blocks oscillate
