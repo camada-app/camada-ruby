@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "openssl"
 require_relative "format"
 
 module Camada
@@ -13,6 +14,11 @@ module Camada
     #
     # The page carries its own SHA-256 rather than calling crypto.subtle: subtle is undefined on
     # non-secure origins (plain http on a LAN host), and 65k awaited digests would be slow anyway.
+    #
+    # CSP (camada-all-y38o, core's mwpo): the inline script and style depend on `bits` alone (the solver reads the
+    # nonce from the form), so their hashes are fixed per difficulty and challenge_page_csp(bits) can allow exactly
+    # them. The engine sends that policy with the page and the Rack middleware replaces any policy the app set on a
+    # served challenge, so a strict app CSP (Rails' content_security_policy, secure_headers) cannot block the solver.
 
     # FIPS 180-4 round constants (cube roots of the first 64 primes).
     K = "0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5," \
@@ -66,6 +72,25 @@ module Camada
       "@keyframes camada-slide{0%{transform:translateX(-120%)}100%{transform:translateX(400%)}}\n"
     ].join.freeze
 
+    # The page's one inline script. Depends on `bits` only: the nonce comes from the form.
+    def self.solver_script(bits)
+      [
+        SOLVER, "\n",
+        "(function(){\n",
+        "  if(typeof window==='undefined'||window.__camadaAutostart===false)return;\n",
+        "  var nonce=document.getElementById('camada-n').value,shift=#{32 - bits};\n",
+        "  function go(){\n",
+        "    for(var n=0;n<5000000;n++){\n",
+        "      if((__camadaSha256Words(nonce+'.'+n)[0]>>>shift)===0){\n",
+        "        document.getElementById('camada-s').value=String(n);\n",
+        "        document.getElementById('camada-f').submit();\n",
+        "        return}}\n",
+        "    document.getElementById('camada-msg').textContent='Could not complete the check. Please reload.'}\n",
+        "  setTimeout(go,30);\n",
+        "})();\n"
+      ].join
+    end
+
     # `action` is the verify endpoint path; `to` has already been through safe_return_to.
     def self.challenge_page(nonce:, action:, to:, bits: POW_BITS)
       bits = bits.clamp(1, 32) # shift 32-bits must stay in range
@@ -82,26 +107,25 @@ module Camada
         "<div class=\"bar\"><i></i></div>\n",
         "</main>\n",
         "<form id=\"camada-f\" method=\"POST\" action=\"#{escape_attr(action)}\">\n",
-        "<input type=\"hidden\" name=\"nonce\" value=\"#{escape_attr(nonce)}\">\n",
+        "<input type=\"hidden\" name=\"nonce\" value=\"#{escape_attr(nonce)}\" id=\"camada-n\">\n",
         "<input type=\"hidden\" name=\"solution\" id=\"camada-s\">\n",
         "<input type=\"hidden\" name=\"to\" value=\"#{escape_attr(to)}\">\n",
         "</form>\n",
-        "<script>#{SOLVER}\n",
-        "(function(){\n",
-        "  if(typeof window==='undefined'||window.__camadaAutostart===false)return;\n",
-        "  var nonce=#{escape_script(nonce)},shift=#{32 - bits};\n",
-        "  function go(){\n",
-        "    for(var n=0;n<5000000;n++){\n",
-        "      if((__camadaSha256Words(nonce+'.'+n)[0]>>>shift)===0){\n",
-        "        document.getElementById('camada-s').value=String(n);\n",
-        "        document.getElementById('camada-f').submit();\n",
-        "        return}}\n",
-        "    document.getElementById('camada-msg').textContent='Could not complete the check. Please reload.'}\n",
-        "  setTimeout(go,30);\n",
-        "})();\n",
-        "</script>\n",
+        "<script>#{solver_script(bits)}</script>\n",
         "</body></html>"
       ].join
+    end
+
+    def self.sha256_src(text) = "'sha256-#{[OpenSSL::Digest::SHA256.digest(text)].pack("m0")}'"
+
+    # The Content-Security-Policy to send with challenge_page(bits:): it allows only the page's own inline script and
+    # style (by 'sha256-...' hash), a form post to the same origin, and nothing else. Send it as the response's only
+    # CSP, removing any Content-Security-Policy or Content-Security-Policy-Report-Only the app set.
+    def self.challenge_page_csp(bits = POW_BITS)
+      bits = bits.clamp(1, 32)
+      @csp_cache ||= {} # bits -> policy; a racing first fill computes the same string twice, harmlessly
+      @csp_cache[bits] ||= "default-src 'none'; script-src #{sha256_src(solver_script(bits))}; " \
+                           "style-src #{sha256_src("\n#{STYLE}")}; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
     end
   end
 end

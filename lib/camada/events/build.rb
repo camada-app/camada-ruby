@@ -68,7 +68,8 @@ module Camada
         "chmob" => first["sec-ch-ua-mobile"], "chplat" => first["sec-ch-ua-platform"],
         "acc" => first["accept"], "lang" => first["accept-language"],
         "fs" => first["sec-fetch-site"], "fm" => first["sec-fetch-mode"],
-        "fd" => first["sec-fetch-dest"], "fu" => first["sec-fetch-user"], "ref" => first["referer"], "org" => first["origin"],
+        "fd" => first["sec-fetch-dest"], "fu" => first["sec-fetch-user"],
+        "ref" => Redact.scrub_url(first["referer"]), "org" => first["origin"], # ref: scrubbed like q (camada-all-ijsa)
         "xrw" => first["x-requested-with"], "auth" => auth_scheme(first["authorization"]), # scheme only, never the credential
         "hm" => mask, "hn" => hn, "hb" => hb, "ck" => cookie.empty? ? 0 : cookie.split(";", -1).length,
         "hord" => names.join(",")[0, 2048] # header order as this host reports it (the env's order under Rack)
