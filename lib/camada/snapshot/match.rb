@@ -97,7 +97,7 @@ module Camada
       def blocked4?(n)
         s = @snap
         b = n >> 8
-        return false if (s.bm4[b >> 5] >> (b & 31)) & 1 == 0
+        return false if (s.bm4[b >> 5] >> (b & 31)).nobits?(1)
 
         hi = n >> 16
         left = s.idx4[hi]
@@ -122,7 +122,7 @@ module Camada
       def blocked6?(w)
         s = @snap
         b = w[0] >> 8
-        return false if (s.bm6[b >> 5] >> (b & 31)) & 1 == 0
+        return false if (s.bm6[b >> 5] >> (b & 31)).nobits?(1)
 
         left = 0
         right = s.n6 - 1
@@ -143,7 +143,7 @@ module Camada
 
       def blocked_asn?(asn)
         s = @snap
-        return (s.asn_bm[asn >> 5] >> (asn & 31)) & 1 != 0 if asn < 4_194_304
+        return (s.asn_bm[asn >> 5] >> (asn & 31)).anybits?(1) if asn < 4_194_304
 
         extra = s.asn_extra
         left = 0
