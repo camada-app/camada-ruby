@@ -29,6 +29,7 @@ RSpec.describe Camada::Engine do
       expect(r.header("x-block-reason")).to eq("ip4")
       expect(r.header("x-block-version")).to eq(a.meta["version"])
       expect(r.header("content-type")).to eq("text/plain")
+      expect(r.header("cache-control")).to eq("no-store") # per-visitor: no shared cache keeps it (camada-all-8lp6)
       expect(r.header("x-block-rule")).to be_nil
       expect(r.header("content-length")).to eq("9")
       expect(h.seen).to eq([])
@@ -301,6 +302,7 @@ RSpec.describe Camada::Engine do
       expect(r.status).to eq(403)
       expect(r.header("x-block-reason")).to eq("rule")
       expect(r.header("x-block-rule")).to eq("builtin:block")
+      expect(r.header("cache-control")).to eq("no-store")
       ev, = h.events
       expect(ev.values_at("blk", "rl")).to eq(["rule", "builtin:block"])
     end
