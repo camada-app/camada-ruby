@@ -72,6 +72,11 @@ use Camada::Rack, engine
    header on its own is never the ip: any caller can set it. **Never `request.ip`**:
    `Rack::Request#ip` trusts `X-Forwarded-For` from anyone, which is exactly the spoof camada
    refuses; the middleware reads `env["REMOTE_ADDR"]` and applies your trusted-proxy rules itself.
+   Entries may carry a port (`ip:port`, `[v6]:port`, as Azure Application Gateway writes them).
+   Under `cidrs` (and the dashboard's Cloudflare option, stored as `cidrs`) the socket peer must
+   itself be one of the trusted ranges or a loopback address (a local front end or sidecar);
+   otherwise the peer is the client and `X-Forwarded-For` is ignored, so a direct hit on your origin
+   cannot pick its own ip. A host that reports no peer (or a unix socket) keeps the plain walk.
 3. Enforces before anything else, beacon endpoints included: your ordered custom rules first (first
    match wins; they read ip, path, user-agent and request headers), then allow → block → challenge.
    A block answers `403 Forbidden` with `x-block-reason`, `x-block-version` and, when a rule
@@ -79,13 +84,16 @@ use Camada::Rack, engine
    `wrn`; a `skip` rule passes with nothing stamped. Cold (no snapshot yet) passes: fail open.
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page (or 403 JSON for a
    non-HTML request); `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
-   ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged.
+   ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
+   carries its own `Content-Security-Policy` (its inline solver and style by hash, `form-action
+   'self'`) and replaces any policy your app set on it (Rails' `content_security_policy`,
+   `secure_headers`), so a strict site CSP cannot block it.
 5. Serves the beacon: `GET /_cam/b.js` (the `@camada/browser` build, vendored) and `POST /_cam/fp`
    (≤ 32 KB, relayed onto the event batch as a `sig: 1` row with the ip camada resolved). Both
    fall through to your app when the tenant switched the beacon off.
 6. Runs your app with `x-rid` (the rid of the request's event row; never on a 101 handshake) and
    the `_sfp` session cookie on its response, and when the server closes the response body ships
-   one redacted event: method, host, path, scrubbed query, status, latency, header
+   one redacted event: method, host, path, scrubbed query (and `Referer` query and fragment), status, latency, header
    names/sizes/order, the auth scheme (never the credential), cookie count (never values), the
    matched route pattern when the framework names it (`sinatra.route`, Rails' `route_uri_pattern`). An exception in your app ships as `st: 500` and propagates unchanged.
 

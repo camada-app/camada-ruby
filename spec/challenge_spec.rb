@@ -134,12 +134,52 @@ RSpec.describe Camada::Challenge do
       expect(html).not_to include("crypto.subtle")
       expect(html).to include("__camadaSha256Words")
       expect(html).to include("shift=16")
-      expect(html).to include('var nonce="abababababababababababababababab"')
+      # the nonce rides the form and the solver reads it there (camada-all-y38o: one script hash per bits value)
+      expect(html).to include('name="nonce" value="abababababababababababababababab" id="camada-n"')
+      expect(html).to include("var nonce=document.getElementById('camada-n').value")
     end
 
     it "clamps the difficulty" do
       expect(Camada::Challenge.challenge_page(nonce: "a" * 32, action: "/v", to: "/", bits: 99)).to include("shift=0")
       expect(Camada::Challenge.challenge_page(nonce: "a" * 32, action: "/v", to: "/", bits: 0)).to include("shift=31")
+    end
+  end
+
+  # camada-all-y38o (core's mwpo): the page sends its own CSP allowing only its inline solver and style by hash, so an
+  # app-wide strict CSP cannot block the solver. The script reads the nonce from the form, so it is fixed per bits.
+  describe "page CSP" do
+    def inline(page, tag) = page.scan(%r{<#{tag}>(.*?)</#{tag}>}m).map(&:first)
+    def sha(s) = "'sha256-#{[OpenSSL::Digest::SHA256.digest(s)].pack("m0")}'"
+
+    it "allows exactly the served inline script and style" do
+      [nil, 1, 12, 16, 20, 32].each do |bits|
+        opts = bits.nil? ? {} : { bits: bits }
+        page = Camada::Challenge.challenge_page(nonce: "abc123", action: "/__camada/challenge", to: "/x", **opts)
+        csp = bits.nil? ? Camada::Challenge.challenge_page_csp : Camada::Challenge.challenge_page_csp(bits)
+        script, = inline(page, "script")
+        style, = inline(page, "style")
+        expect(csp).to include("script-src #{sha(script)};", "style-src #{sha(style)};", "default-src 'none'", "form-action 'self'")
+        expect(csp).not_to include("unsafe")
+      end
+    end
+
+    it "is fixed per bits value, the nonce staying in the form" do
+      a = Camada::Challenge.challenge_page(nonce: "aaaa", action: "/a", to: "/one")
+      b = Camada::Challenge.challenge_page(nonce: "bbbb", action: "/b", to: '/two?x="y')
+      expect(inline(a, "script")).to eq(inline(b, "script"))
+      expect(inline(a, "script").first).not_to include("aaaa")
+      expect(a).to include('name="nonce" value="aaaa" id="camada-n"')
+      expect(Camada::Challenge.challenge_page_csp).to eq(Camada::Challenge.challenge_page_csp(16))
+      expect(Camada::Challenge.challenge_page_csp(12)).not_to eq(Camada::Challenge.challenge_page_csp(16))
+      expect(Camada::Challenge.challenge_page_csp(99)).to eq(Camada::Challenge.challenge_page_csp(32))
+    end
+
+    it "is the same policy as core" do
+      # @camada/core challengePageCsp(16) (src/challenge/page.ts): the page is byte-for-byte core's, so the hashes match
+      expect(Camada::Challenge.challenge_page_csp).to eq(
+        "default-src 'none'; script-src 'sha256-ciEqEwbzJaoB3rni2OdS8TuYa+/yFdFMAkRscUn8z8k='; " \
+        "style-src 'sha256-uTQFkKw4mZsBeb9oMeUmhuhVK7WwsKvYVU1JAzADMu0='; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"
+      )
     end
   end
 end

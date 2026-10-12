@@ -308,7 +308,11 @@ module Camada
 
     def page(ip, to)
       html = Challenge.challenge_page(nonce: @kit.nonce(ip, now_ms), action: @challenge_path, to: to)
-      Answer.new(status: 403, headers: CHALLENGE_HEADERS.merge("content-type" => "text/html; charset=utf-8"), body: html)
+      headers = CHALLENGE_HEADERS.merge(
+        "content-type" => "text/html; charset=utf-8",
+        "content-security-policy" => Challenge.challenge_page_csp # only its own inline solver and style (camada-all-y38o)
+      )
+      Answer.new(status: 403, headers: headers, body: html)
     end
 
     # 403 + the proof-of-work page (HTML navigations) or 403 JSON (everything else), plus the
