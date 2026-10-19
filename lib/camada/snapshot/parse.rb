@@ -437,9 +437,15 @@ module Camada
           v = read.call(r)
           next false if v.nil? || rx.nil?
 
-          v = strip_control(v) if strip
           # The cap comes before regex_hit?, whose rescue would turn an encoding error into a miss.
-          over_cap?(v) ? deny : regex_hit?(rx, v, deny)
+          hit = ->(s) { over_cap?(s) ? deny : regex_hit?(rx, s, deny) }
+          next hit.call(v) unless strip
+
+          stripped = strip_control(v) # one scan (S5)
+          next hit.call(v) if stripped.bytesize == v.bytesize
+
+          # S5: control chars never widen a skip and never neuter a deny regex
+          deny && (hit.call(v) || hit.call(stripped))
         end
       when "contains"
         needle = values[0]
