@@ -246,6 +246,16 @@ RSpec.describe "Camada::Snapshot matches cap" do
     expect(Camada::Snapshot.regex_hit?(rx, bad)).to be(false)
   end
 
+  it "reads a binary-tagged value that is valid UTF-8 as UTF-8 (camada-all-cwb4)" do
+    cafe = "caf\u00e9".b
+    expect(matcher([rule("block", "ua", "\u00f1")]).match(input(ua: cafe)).rule).to be_nil # a deny that cannot match stays a miss
+    expect(matcher([rule("block", "ua", "\u00e9")]).match(input(ua: cafe)).rule).to eq("r")
+    expect(matcher([rule("skip", "ua", "\u00e9")]).match(input(ua: cafe)).rule).to eq("r") # a skip that matches fires
+    expect(matcher([rule("skip", "path", "^/caf")]).match(input(path: "/caf\u00e9".b)).rule).to eq("r")
+    expect(matcher([rule("block", "path", "\u00f1")]).match(input(path: "/caf\u00e9".b)).rule).to be_nil
+    expect(Camada::Snapshot.regex_hit?(Camada::Snapshot.compile_regex("\u00e9"), cafe)).to be(true)
+  end
+
   it "applies the cap to path forms, deny and skip" do
     m = matcher([rule("skip", "path", "^/static-mirror/").merge("id" => "s"), rule("block", "path", "^/api/v[0-9]+/dump$").merge("id" => "b")])
     {
