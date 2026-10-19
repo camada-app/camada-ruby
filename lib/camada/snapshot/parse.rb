@@ -196,9 +196,19 @@ module Camada
     # keep false; a custom `matches` rule passes `deny` (regex-cap-sdk v1: an unevaluable value is a
     # hit for block/challenge/warn and a miss for skip, the same as an over-cap one, camada-all-cwb4).
     def self.regex_hit?(rx, value, on_error = false)
-      rx.match?(value)
+      rx.match?(utf8_view(value))
     rescue StandardError
       on_error
+    end
+
+    # A value tagged ASCII-8BIT (Rack) whose bytes are valid UTF-8 is read as UTF-8, so a non-ASCII
+    # pattern neither raises nor flips a deny/skip outcome. Genuinely invalid bytes stay as they are
+    # and take the on_error path.
+    def self.utf8_view(v)
+      return v if v.encoding == Encoding::UTF_8
+
+      s = v.dup.force_encoding(Encoding::UTF_8)
+      s.valid_encoding? ? s : v
     end
 
     # regex-cap-sdk v1 S1: the longest value a `matches` regex runs on, in UTF-16 code units.
