@@ -119,7 +119,7 @@ RSpec.describe Camada::Snapshot do
     expect(m.match(input(path: "/api/v2/dump")).rule).to eq("ver")
     expect(m.match(input(path: "/api/v٣/dump")).rule).to be_nil # \d is ASCII, as JS reads it
     m2 = rules_snapshot([{ "id" => "any", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => "^a[^]b\\cJ$" }] }])
-    expect(m2.match(input(ua: "aXb\n")).rule).to be_nil # LF is stripped from a ua before matches (regex-cap-sdk S2)
+    expect(m2.match(input(ua: "aXb\n")).rule).to eq("any") # v3 (S5): a deny also tests the raw value, which \cJ reads
     expect(Camada::Snapshot.compile_regex("^a[^]b\\cJ$").match?("a\nb\n")).to be(true)
     expect(m2.match(input(ua: "ab")).rule).to be_nil
     # JS anchors bind the whole input; Ruby's ^ and $ are line anchors unless translated
@@ -224,12 +224,46 @@ RSpec.describe "Camada::Snapshot matches cap" do
     expect(Camada::Snapshot.utf16_len("a\xFF".b)).to eq(2)
   end
 
+  def skip_block(field, skip_pat, name: nil)
+    s = rule("skip", field, skip_pat, name: name).merge("id" => "s")
+    c = { "f" => field, "op" => "contains", "v" => "a" }
+    c["name"] = name if name
+    matcher([s, { "id" => "b", "action" => "block", "conds" => [c] }])
+  end
+
+  it "S5: a deny regex tests the raw value too, so a control-char pattern fires" do
+    expect(matcher([rule("block", "ua", "\\t")]).match(input(ua: "a\tb")).rule).to eq("r")
+    expect(matcher([rule("block", "header", "\\t", name: "x-v")]).match(input(header: ->(n) { n == "x-v" ? "a\tb" : nil })).rule).to eq("r")
+  end
+
+  it "S5: a deny regex still meets the stripped value" do
+    expect(matcher([rule("block", "ua", "sqlmap")]).match(input(ua: "sql\tmap")).rule).to eq("r")
+    expect(matcher([rule("block", "header", "sqlmap", name: "x-v")]).match(input(header: ->(n) { n == "x-v" ? "sql\tmap" : nil })).rule).to eq("r")
+  end
+
+  it "S5: a skip hits a clean value and misses one with control characters" do
+    m = skip_block("ua", "^partner-[a-z]+$")
+    expect(m.match(input(ua: "partner-acme")).rule).to eq("s")
+    expect(m.match(input(ua: "partner-acme\n")).rule).to eq("b")
+    h = skip_block("header", "^partner-[a-z]+$", name: "x-p")
+    expect(h.match(input(header: ->(n) { n == "x-p" ? "partner-acme" : nil })).rule).to eq("s")
+    expect(h.match(input(header: ->(n) { n == "x-p" ? "partner-acme\n" : nil })).rule).to eq("b")
+  end
+
+  it "S5: raw over the cap but stripped under it: deny hits, skip misses" do
+    over = "#{"a" * 2048}\t"
+    expect(matcher([rule("block", "ua", "^b")]).match(input(ua: over)).rule).to eq("r")
+    m = skip_block("ua", "^a+$")
+    expect(m.match(input(ua: "a" * 2048)).rule).to eq("s")
+    expect(m.match(input(ua: over)).rule).to eq("b")
+  end
+
   it "deletes control characters from ua and header before matches, contains stays raw" do
     m = matcher([rule("warn", "ua", "Scrapy/[0-9]"), rule("block", "header", "^1\\.2$", name: "x-v").merge("id" => "h")])
     expect(m.match(input(ua: "Scrapy\t/2.11")).rule).to eq("r")
     expect(m.match(input(ua: "Scr\x00apy/2\x7f.1")).rule).to eq("r")
     expect(m.match(input(header: ->(n) { n == "x-v" ? "1\x7f.2\n" : nil })).rule).to eq("h")
-    expect(matcher([rule("block", "ua", "^b")]).match(input(ua: "#{"a" * 2048}\t")).rule).to be_nil
+    expect(matcher([rule("block", "ua", "^b")]).match(input(ua: "#{"a" * 2048}\t")).rule).to eq("r") # v3 (S5): raw 2049 is over the cap
     c = matcher([{ "id" => "c", "action" => "block", "conds" => [{ "f" => "ua", "op" => "contains", "v" => "curl/" }] }])
     expect(c.match(input(ua: "cu\x00rl/8")).rule).to be_nil
     expect(Camada::Snapshot.strip_control("a\xFFb\n".b)).to eq("a\xFFb".b)
