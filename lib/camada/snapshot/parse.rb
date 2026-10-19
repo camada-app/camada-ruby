@@ -191,10 +191,44 @@ module Camada
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
     # PATH_INFO with high bytes, say) reads as "no match" rather than an exception on the request path.
-    def self.regex_hit?(rx, value)
+    #
+    # `on_error` is what a value the engine cannot read answers. The legacy block-side path regexes
+    # keep false; a custom `matches` rule passes `deny` (regex-cap-sdk v1: an unevaluable value is a
+    # hit for block/challenge/warn and a miss for skip, the same as an over-cap one, camada-all-cwb4).
+    def self.regex_hit?(rx, value, on_error = false)
       rx.match?(value)
     rescue StandardError
-      false
+      on_error
+    end
+
+    # regex-cap-sdk v1 S1: the longest value a `matches` regex runs on, in UTF-16 code units.
+    MAX_MATCH_INPUT = 2048
+
+    # Length in UTF-16 code units (what edge's `v.length` counts: an astral code point is 2). A String
+    # that is not valid UTF-8 (Rack hands over ASCII-8BIT) counts its bytes.
+    def self.utf16_len(v)
+      s = v.dup.force_encoding(Encoding::UTF_8)
+      return v.bytesize unless s.valid_encoding?
+
+      s.length + s.each_char.count { |c| c.ord > 0xFFFF }
+    end
+
+    def self.over_cap?(v)
+      v.bytesize > MAX_MATCH_INPUT && utf16_len(v) > MAX_MATCH_INPUT
+    end
+
+    # regex-cap-sdk S2: delete [\x00-\x1f\x7f] from a ua/header value before a `matches` regex runs.
+    # Bytewise, so it stays safe on invalid UTF-8.
+    def self.strip_control(v)
+      v.b.delete("\x00-\x1f\x7f").force_encoding(v.encoding)
+    end
+
+    # regex-cap-sdk S3: a raw control character in the raw path form is spelled %xx, as canon_path does.
+    def self.encode_control(p)
+      b = p.b
+      return p unless b.match?(/[\x00-\x1f\x7f]/n)
+
+      b.gsub(/[\x00-\x1f\x7f]/n) { |c| format("%%%02x", c.ord) }.force_encoding(p.encoding)
     end
 
     # The same envelope for the plain string ops: Puma hands every env value to Rack as
@@ -275,7 +309,7 @@ module Camada
       p = strip_query(raw)
       return [p, p, p] if canonical?(p)
 
-      [p, canon_path(p, dots: false), canon_path(p)]
+      [encode_control(p), canon_path(p, dots: false), canon_path(p)]
     end
 
     def self.path_dir(p) = p.end_with?("/") ? p : "#{p}/"
@@ -308,12 +342,14 @@ module Camada
       deny ? (pred.call(forms[0]) || pred.call(forms[1]) || pred.call(forms[2])) : (pred.call(forms[1]) && pred.call(forms[2]))
     end
 
-    # One path condition -> a predicate over a single path form.
-    def self.path_pred(op, values)
+    # One path condition -> a predicate over a single path form. A `matches` form over MAX_MATCH_INPUT
+    # never runs the regex: it answers `deny` (a hit for block/challenge/warn, a miss for skip), and so
+    # does a form the regex engine cannot read.
+    def self.path_pred(op, values, deny = true)
       case op
       when "matches"
         rx = compile_regex(values[0], Regexp::IGNORECASE)
-        ->(p) { !rx.nil? && regex_hit?(rx, p) }
+        ->(p) { !rx.nil? && (over_cap?(p) ? deny : regex_hit?(rx, p, deny)) }
       when "starts_with"
         v = values[0]
         key = v.end_with?("/") ? dir_key(v) : canon_path(v)
@@ -345,7 +381,7 @@ module Camada
       op = c["op"].to_s
       if f == "path" # every path op reads the canonical forms (see "paths" above)
         raw = c["v"]
-        pred = path_pred(op, raw.is_a?(Array) ? raw.map(&:to_s) : [raw.to_s])
+        pred = path_pred(op, raw.is_a?(Array) ? raw.map(&:to_s) : [raw.to_s], deny)
         return ->(r) { path_hit?(r.paths, deny, &pred) }
       end
       negate = op == "is_not" || op == "not_in"
@@ -386,9 +422,14 @@ module Camada
       case op
       when "matches"
         rx = compile_regex(values[0])
+        strip = f == "ua" || f == "header"
         lambda do |r|
           v = read.call(r)
-          !v.nil? && !rx.nil? && regex_hit?(rx, v)
+          next false if v.nil? || rx.nil?
+
+          v = strip_control(v) if strip
+          # The cap comes before regex_hit?, whose rescue would turn an encoding error into a miss.
+          over_cap?(v) ? deny : regex_hit?(rx, v, deny)
         end
       when "contains"
         needle = values[0]
