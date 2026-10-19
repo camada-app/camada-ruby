@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 - 2026-10-19
+
+- fix (security): a custom-rule `matches` regex never runs on a ua, header or path value over 2048 chars (UTF-16 units): over-cap fails closed, a hit for block/challenge/warn and a miss for skip/allow, never truncated (truncation would fail a deny rule open). (camada-all-q980)
+- fix (security): control characters never reach the matcher alone: a ua/header value carrying `[\x00-\x1f\x7f]` is tested raw and stripped for deny rules (a pattern that targets `\t` or `\x00` still fires), and never matches a skip/allow rule, so stripping cannot widen an exemption such as `^partner-[a-z]+$` on `partner-acme\n`. The raw path form %-encodes the same characters. (camada-all-q980, camada-all-wh9m)
+- fix (security): a regex error on a value Onigmo cannot read (invalid bytes from a custom adapter that skips the scrub) fails closed: a hit for deny rules and a miss for skip/allow, instead of `false`. A binary-tagged (ASCII-8BIT) Rack value whose bytes are valid UTF-8 is matched as UTF-8, so a non-ASCII pattern no longer takes that error path. (camada-all-cwb4)
+- test: the shared blk5 conformance vectors (RC01-RC47, contract regex-cap-sdk v3) run against `../camada-core/test/fixtures`.
+
 ## 0.1.4 - 2026-10-12
 
 - fix: a challenge page's CSP is replaced in place (Rack::Headers keeps its class).
