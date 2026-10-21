@@ -3,3 +3,11 @@
 # `rake build` / `rake release` from bundler: publish.yml's rubygems/release-gem step runs
 # `rake release`, which builds the gem from camada.gemspec and pushes it with the OIDC token.
 require "bundler/gem_tasks"
+
+require "rspec/core/rake_task"
+require "rubocop/rake_task"
+
+# Bare `rake` runs the same pair CI does: rubocop, then rspec.
+RSpec::Core::RakeTask.new(:spec)
+RuboCop::RakeTask.new
+task default: %i[rubocop spec]
