@@ -3,8 +3,8 @@
 # The SDK's wire identity: x-camada-sdk: @camada/ruby/<version>. One literal in version.rb is the
 # single source the gemspec reads and every sibling drift guard parses.
 RSpec.describe "Camada::VERSION" do
-  # edge-analyst src/freshness.js SDK_RE: anything else is silently dropped from sdk_versions.
-  analyst_sdk_re = %r{\A@?[a-z0-9._-]+(/[a-z0-9._-]+)?/\d+\.\d+\.\d+[a-z0-9.-]*\z}i
+  # edge-analyst src/freshness.js sdkId (SDK_RE, exact-case SDK_NAMES): anything else is dropped.
+  analyst_sdk_re = %r{\A@camada/ruby/\d+\.\d+\.\d+[A-Za-z0-9.-]*\z}
   root = File.expand_path("..", __dir__)
 
   it "is the literal the drift guards parse and the gemspec builds" do
