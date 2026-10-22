@@ -362,12 +362,12 @@ RSpec.describe Camada::Engine do
     end
 
     it "signals a non-html request and lets the app answer" do
-      app = ->(_env) { [201, { "content-type" => "application/json", "Cache-Control" => "public, max-age=600" }, ['{"ok":true}']] }
+      app = ->(_env) { [201, { "content-type" => "application/json", "Cache-Control" => "public, max-age=600", "CDN-Cache-Control" => "public, max-age=60", "Surrogate-Control" => "max-age=60" }, ['{"ok":true}']] }
       h = site(handler: app)
       r = h.call("GET", "/api", headers: [["accept", "application/json"]], peer: challenged)
       expect([r.status, r.body, h.seen.length]).to eq([201, '{"ok":true}', 1])
       expect(r.header("x-camada-challenge")).to eq("1")
-      expect(r.headers_named("cache-control")).to eq(["no-store"])
+      Camada::Engine::NO_STORE_HEADERS.each { |name| expect(r.headers_named(name)).to eq(["no-store"]) } # camada-all-1zlg
       expect(r.header("x-rid")).not_to be_nil
       r2 = h.call("GET", "/api", headers: [["accept", "text/html"], ["sec-fetch-dest", "empty"]], peer: challenged)
       expect([r2.status, r2.header("x-camada-challenge")]).to eq([201, "1"])
@@ -391,12 +391,13 @@ RSpec.describe Camada::Engine do
     end
 
     it "does not signal a client holding a valid _cch" do
-      h = site
+      h = site(handler: ->(_env) { [200, { "CDN-Cache-Control" => "public, max-age=60" }, ["ok"]] })
       token = h.engine.kit.issue(challenged, h.engine.now_ms)
       r = h.call("GET", "/api", headers: [["accept", "application/json"], ["cookie", "_cch=#{token}"]], peer: challenged)
       expect(r.status).to eq(200)
       expect(r.header("x-camada-challenge")).to be_nil
       expect(r.header("cache-control")).to be_nil
+      expect(r.headers_named("cdn-cache-control")).to eq(["public, max-age=60"]) # the app's header is untouched
       ev, = h.events
       expect(ev).not_to include("chs")
     end
@@ -406,12 +407,13 @@ RSpec.describe Camada::Engine do
       h = nil
       gated = lambda do |env|
         expect(h.engine.serve_challenge(env["camada"])).to be_nil
-        [200, { "cache-control" => "max-age=60" }, ["data"]]
+        [200, { "cache-control" => "max-age=60", "CDN-Cache-Control" => "public, max-age=60" }, ["data"]]
       end
       h = site(handler: gated)
       r = h.call("GET", "/data", headers: [["accept", "application/json"]])
       expect([r.status, r.body, r.header("x-camada-challenge")]).to eq([200, "data", "1"])
       expect(r.headers_named("cache-control")).to eq(["no-store"])
+      expect(r.headers_named("cdn-cache-control")).to eq(["no-store"])
       ev, = h.events
       expect(ev.values_at("chs", "st")).to eq([1, 200])
       expect(ev).not_to include("blk")
