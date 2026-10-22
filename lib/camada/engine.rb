@@ -318,8 +318,8 @@ module Camada
       parsed = Camada.parse_json(body)
       return answer unless parsed.is_a?(Hash)
 
-      # spread first: ip and tap are the server's word
-      @queue.push(parsed.except(*REQUEST_ROW_KEYS).merge!("sig" => 1, "ip" => ip, "tap" => TAP))
+      # spread first: ip, tap and rts (the relay clock) are the server's word
+      @queue.push(parsed.except(*REQUEST_ROW_KEYS).merge!("sig" => 1, "ip" => ip, "tap" => TAP, "rts" => now_ms))
       answer
     end
 
