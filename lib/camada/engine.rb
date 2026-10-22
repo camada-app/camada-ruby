@@ -83,6 +83,8 @@ module Camada
   # done. Everything runs inside the fail-open envelope: a camada bug must never 5xx the customer,
   # and CAMADA_DISABLED=1 bypasses the SDK entirely.
   class Engine
+    NO_STORE_HEADERS = %w[cache-control cdn-cache-control surrogate-control cloudflare-cdn-cache-control
+                          vercel-cdn-cache-control netlify-cdn-cache-control].freeze
     CHALLENGE_HEADERS = { "cache-control" => "no-store", "x-camada-challenge" => "1" }.freeze
 
     attr_reader :env, :snap, :queue, :kit, :script_path, :fp_path, :challenge_path, :challenge_on
