@@ -251,6 +251,15 @@ RSpec.describe Camada::Engine do
       expect(row.keys & forged.keys).to eq([])
     end
 
+    it "stamps rts from the relay clock over a browser-supplied one" do
+      h = site
+      before = (Time.now.to_f * 1000).floor
+      expect(h.call("POST", "/_cam/fp", body: JSON.generate({ "rid" => "r-1", "rts" => 1 })).status).to eq(204)
+      after = (Time.now.to_f * 1000).ceil
+      row, = h.events
+      expect(row["rts"]).to be_an(Integer).and be_between(before, after)
+    end
+
     it "drops junk bodies instead of shipping them" do
       h = site
       ["not json", "[1,2]", "42", ""].each { |junk| expect(h.call("POST", "/_cam/fp", body: junk).status).to eq(204) }
