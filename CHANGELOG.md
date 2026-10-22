@@ -3,6 +3,7 @@
 ## Unreleased
 
 - feat: a non-HTML request under a challenge row passes to the app instead of a 403 JSON `challenge_required`: its response carries `x-camada-challenge: 1` and `cache-control: no-store` (replacing the app's), and its event ships `chs: 1` whatever `sample` and `exclude` say. `serve_challenge` does the same for a non-page request and returns `nil`. (camada-all-7cgs)
+- fix (security): the first-party beacon relay (/_cam/fp) drops SDK-attested keys (tlsx, ja4, asn, cc, sid, ns, st, dur, rt, blk, rl, wrn, chs, ch, et, uid) from the visitor's body before queuing the sig:1 row, so a visitor cannot forge them; the analyst joins those from the request row. (camada-all-q617)
 
 ## 0.1.5 - 2026-10-19
 
