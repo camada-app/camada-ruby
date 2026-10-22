@@ -199,11 +199,12 @@ module Camada
     end
 
     # A request that passed under a challenge (handle() or serve_challenge() marked the ctx) carries
-    # `x-camada-challenge: 1`, and `no-store` in place of the app's cache-control: the signal is per client.
+    # `x-camada-challenge: 1`, and `no-store` in place of the app's cache-control and CDN cache headers: the signal
+    # is per client. CDNs read their own cache header ahead of cache-control, so all of these end up no-store.
     def signal(headers)
       headers = headers.to_h
-      headers.delete_if { |k, _| k.to_s.downcase == "cache-control" }
-      headers["cache-control"] = "no-store"
+      headers.delete_if { |k, _| Engine::NO_STORE_HEADERS.include?(k.to_s.downcase) }
+      Engine::NO_STORE_HEADERS.each { |h| headers[h] = "no-store" }
       headers["x-camada-challenge"] = "1"
       headers
     rescue StandardError => e

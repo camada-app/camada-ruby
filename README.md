@@ -95,7 +95,7 @@ use Camada::Rack, engine
    decided, `x-block-rule`; its event ships with `blk` (and `rl`). A `warn` rule passes and stamps
    `wrn`; a `skip` rule passes with nothing stamped. Cold (no snapshot yet) passes: fail open.
 4. Challenge: a `challenge` verdict gets the self-contained proof-of-work page on a page load. Any other
-   request passes to your app signalled: `x-camada-challenge: 1`, `cache-control: no-store` (replacing
+   request passes to your app signalled: `x-camada-challenge: 1`, `cache-control: no-store` and the CDN cache headers (replacing
    yours) and `chs: 1` on its event, which ships whatever `sample` and `exclude` say; `POST /__camada/challenge` verifies the solution, sets `_cch` (bound to the
    ip, one hour) and 302s back. A request whose ip cannot be resolved is never challenged. The page
    carries its own `Content-Security-Policy` (its inline solver and style by hash, nothing else)
