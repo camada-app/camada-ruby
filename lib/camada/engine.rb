@@ -316,7 +316,8 @@ module Camada
       parsed = Camada.parse_json(body)
       return answer unless parsed.is_a?(Hash)
 
-      @queue.push(parsed.merge("sig" => 1, "ip" => ip, "tap" => TAP)) # spread first: ip and tap are the server's word
+      # spread first: ip and tap are the server's word
+      @queue.push(parsed.except(*REQUEST_ROW_KEYS).merge("sig" => 1, "ip" => ip, "tap" => TAP))
       answer
     end
 

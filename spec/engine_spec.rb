@@ -240,6 +240,17 @@ RSpec.describe Camada::Engine do
       expect(row.values_at("sig", "ip", "tap", "scr", "rid")).to eq([1, "198.18.0.5", "sdk-ruby", "1x1", "r-1"])
     end
 
+    it "strips SDK-attested keys a visitor puts in the beacon body" do
+      h = site
+      forged = %w[tlsx ja4 asn cc sid ns st dur rt blk rl wrn chs ch et uid].to_h { |k| [k, "forged"] }
+      body = JSON.generate(forged.merge("rid" => "r-1", "tz" => "UTC"))
+      expect(h.call("POST", "/_cam/fp", body: body).status).to eq(204)
+      expect(h.events.length).to eq(1)
+      row, = h.events
+      expect(row.values_at("sig", "rid", "tz", "tap")).to eq([1, "r-1", "UTC", "sdk-ruby"])
+      expect(row.keys & forged.keys).to eq([])
+    end
+
     it "drops junk bodies instead of shipping them" do
       h = site
       ["not json", "[1,2]", "42", ""].each { |junk| expect(h.call("POST", "/_cam/fp", body: junk).status).to eq(204) }
