@@ -35,7 +35,7 @@ RSpec.describe Camada do
     engine = described_class.configure(env: Host::ENV_BASE, transport: a)
     Host.loaded(engine)
     drv = Host::RackDriver.new(engine)
-    r = drv.call(Host::Call.new(method: "GET", path: "/", headers: [], body: "", peer: Host::PEER))
+    r = drv.call(Host::Call.new(method: "GET", path: "/", headers: Host::HTML, body: "", peer: Host::PEER))
     env = drv.seen[0]
     expect(described_class.engine_for(env["camada"])).to be(engine)
     expect(described_class.engine_for(nil)).to be(engine)

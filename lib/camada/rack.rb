@@ -168,6 +168,7 @@ module Camada
         raise
       end
       headers = stamp(status, headers, passed)
+      headers = signal(headers) if passed.ctx && passed.ctx["signalled"]
       headers = own_challenge_csp(headers) if passed.ctx && passed.ctx["challenged"]
       finish = passed.on_finish
       return [status, headers, body] if finish.nil?
@@ -191,6 +192,19 @@ module Camada
         key = headers.keys.find { |k| k.to_s.downcase == "set-cookie" } || "set-cookie"
         headers[key] = join_cookies(headers[key], passed.set_cookie)
       end
+      headers
+    rescue StandardError => e
+      Guarded.log_rate_limited(e)
+      headers
+    end
+
+    # A request that passed under a challenge (handle() or serve_challenge() marked the ctx) carries
+    # `x-camada-challenge: 1`, and `no-store` in place of the app's cache-control: the signal is per client.
+    def signal(headers)
+      headers = headers.to_h
+      headers.delete_if { |k, _| k.to_s.downcase == "cache-control" }
+      headers["cache-control"] = "no-store"
+      headers["x-camada-challenge"] = "1"
       headers
     rescue StandardError => e
       Guarded.log_rate_limited(e)
