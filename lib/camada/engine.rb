@@ -317,7 +317,7 @@ module Camada
       return answer unless parsed.is_a?(Hash)
 
       # spread first: ip and tap are the server's word
-      @queue.push(parsed.except(*REQUEST_ROW_KEYS).merge("sig" => 1, "ip" => ip, "tap" => TAP))
+      @queue.push(parsed.except(*REQUEST_ROW_KEYS).merge!("sig" => 1, "ip" => ip, "tap" => TAP))
       answer
     end
 
