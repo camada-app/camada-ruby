@@ -83,7 +83,8 @@ module Camada
     end
 
     # A Rack triple [status, headers, [body]] to answer with (Sinatra: `halt(*answer)`) until the
-    # browser holds a valid _cch, then nil.
+    # browser holds a valid _cch, then nil. A non-page (non-HTML) request also gets nil and is
+    # signalled (x-camada-challenge: 1, no-store, chs: 1).
     def serve_challenge(env)
       ctx = ctx_of(env)
       engine_for(ctx).serve_challenge(ctx)&.to_rack
