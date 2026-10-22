@@ -350,14 +350,60 @@ RSpec.describe Camada::Engine do
       expect(ev.values_at("st", "blk", "p")).to eq([403, "challenge", "/account"])
     end
 
-    it "answers json for a non-html request" do
-      h = site
+    it "signals a non-html request and lets the app answer" do
+      app = ->(_env) { [201, { "content-type" => "application/json", "Cache-Control" => "public, max-age=600" }, ['{"ok":true}']] }
+      h = site(handler: app)
       r = h.call("GET", "/api", headers: [["accept", "application/json"]], peer: challenged)
-      expect(r.status).to eq(403)
-      expect(r.header("content-type")).to eq("application/json")
-      expect(JSON.parse(r.body)).to eq({ "error" => "challenge_required" })
+      expect([r.status, r.body, h.seen.length]).to eq([201, '{"ok":true}', 1])
+      expect(r.header("x-camada-challenge")).to eq("1")
+      expect(r.headers_named("cache-control")).to eq(["no-store"])
+      expect(r.header("x-rid")).not_to be_nil
       r2 = h.call("GET", "/api", headers: [["accept", "text/html"], ["sec-fetch-dest", "empty"]], peer: challenged)
-      expect(r2.header("content-type")).to eq("application/json")
+      expect([r2.status, r2.header("x-camada-challenge")]).to eq([201, "1"])
+      evs = h.events
+      expect(evs.length).to eq(2)
+      evs.each do |ev|
+        expect(ev.values_at("chs", "st")).to eq([1, 201])
+        expect(ev).to include("dur")
+        expect(ev).not_to include("blk")
+      end
+    end
+
+    [{ "exclude" => ["/api"] }, { "sample" => 0 }].each do |cfg|
+      it "ships a signalled event past #{cfg.keys.first}" do
+        a.config.merge!(cfg)
+        h = site
+        h.call("GET", "/api", headers: [["accept", "application/json"]], peer: challenged)
+        ev, = h.events
+        expect(ev.values_at("chs", "st")).to eq([1, 200])
+      end
+    end
+
+    it "does not signal a client holding a valid _cch" do
+      h = site
+      token = h.engine.kit.issue(challenged, h.engine.now_ms)
+      r = h.call("GET", "/api", headers: [["accept", "application/json"], ["cookie", "_cch=#{token}"]], peer: challenged)
+      expect(r.status).to eq(200)
+      expect(r.header("x-camada-challenge")).to be_nil
+      expect(r.header("cache-control")).to be_nil
+      ev, = h.events
+      expect(ev).not_to include("chs")
+    end
+
+    it "signals a non-html request on demand: nil, the app renders, headers and chs" do
+      a.config["sample"] = 0
+      h = nil
+      gated = lambda do |env|
+        expect(h.engine.serve_challenge(env["camada"])).to be_nil
+        [200, { "cache-control" => "max-age=60" }, ["data"]]
+      end
+      h = site(handler: gated)
+      r = h.call("GET", "/data", headers: [["accept", "application/json"]])
+      expect([r.status, r.body, r.header("x-camada-challenge")]).to eq([200, "data", "1"])
+      expect(r.headers_named("cache-control")).to eq(["no-store"])
+      ev, = h.events
+      expect(ev.values_at("chs", "st")).to eq([1, 200])
+      expect(ev).not_to include("blk")
     end
 
     it "blocks outright rather than challenging a blocked ip" do
@@ -455,7 +501,7 @@ RSpec.describe Camada::Engine do
       expect(r.body).to include('action="/verify"')
       nonce = nonce_of(r.body)
       expect(h.call("POST", "/verify", body: "nonce=#{nonce}&solution=#{solve(nonce)}&to=%2F", peer: challenged).status).to eq(302)
-      expect(h.call("POST", "/__camada/challenge", body: "x=1", peer: challenged).status).to eq(403) # the old path is just a challenged request now
+      expect(h.call("POST", "/__camada/challenge", body: "x=1", headers: Host::HTML, peer: challenged).status).to eq(403) # the old path is just a challenged request now
     end
   end
 
