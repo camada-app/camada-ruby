@@ -162,7 +162,8 @@ event name is free-form; the analyst's app-context rules read this vocabulary:
 
 A route you gate yourself: `Camada.serve_challenge(env)` returns a Rack triple
 `[status, headers, [body]]` to answer with (Sinatra: `halt(*answer)`) until the browser holds a
-valid `_cch`, then `nil`.
+valid `_cch`, then `nil`. A non-page (non-HTML) request also gets `nil` and is signalled
+(`x-camada-challenge: 1`, `no-store`, `chs: 1`).
 
 ## What this tap can see
 
