@@ -148,14 +148,20 @@ module Camada
     end
 
     # Serve the challenge for this request on demand — for a route the app wants to gate itself.
-    # nil when the client already holds a valid _cch (render your own page), or when the client
-    # cannot be identified (fail open).
+    # nil when the client already holds a valid _cch (render your own page), when the client
+    # cannot be identified (fail open), or when it is not a page load: that request is signalled
+    # instead (`x-camada-challenge: 1`, `chs: 1`) and the app renders.
     def serve_challenge(ctx)
       return nil if disabled? || @kit.nil? || ctx.nil?
 
       req = ctx["_req"]
       ip = ctx["ip"]
       return nil if req.nil? || ip.nil? || ip.empty? || challenge_passed?(req, ip)
+
+      unless Challenge.wants_html?(req.header("accept"), req.header("sec-fetch-dest"))
+        ctx["signalled"] = true
+        return nil
+      end
 
       ctx["challenged"] = true
       serve_challenge_answer(req, ip, ctx["sid"])
@@ -230,11 +236,18 @@ module Camada
       # A challenge needs a resolved client IP: the nonce and the _cch cookie are bound to it,
       # so without one a single solve would mint a cookie every unidentified client could
       # present. No ip -> no challenge (fail open), the same stance ip rules take.
+      signalled = false
       if @challenge_on && ip && !ip.empty?
         # The verify endpoint answers first: a challenged client must be able to reach it.
         return verify(req, body, ip) if req.method == "POST" && req.path == @challenge_path
+
         if v.challenge && !challenge_passed?(req, ip)
-          return serve_challenge_answer(req, ip, Camada.cookie_value(req.header("cookie"), SESSION_COOKIE))
+          # Only a page load can be challenged; anything else passes, signalled (camada-all-7cgs).
+          if Challenge.wants_html?(req.header("accept"), req.header("sec-fetch-dest"))
+            return serve_challenge_answer(req, ip, Camada.cookie_value(req.header("cookie"), SESSION_COOKIE))
+          end
+
+          signalled = true
         end
       end
 
@@ -256,6 +269,7 @@ module Camada
         set_cookie += "; Secure" if secure?(req)
       end
       ctx = { "rid" => rid, "sid" => sid, "ip" => ip, "_req" => req, "_engine" => self }
+      ctx["signalled"] = true if signalled
 
       cfg = @snap.config || {}
       excluded = (cfg["exclude"] || []).any? { |x| req.path.start_with?(x.to_s) }
@@ -266,9 +280,12 @@ module Camada
       on_finish = lambda do |status|
         # serve_challenge may have answered from inside the app, and it already shipped the
         # `blk: "challenge"` row — one request, one event.
-        next if ctx["challenged"] || excluded || !sampled
+        next if ctx["challenged"]
+        # a signalled row ships whatever sample and exclude say, like the 403 row it replaces
+        next if !ctx["signalled"] && (excluded || !sampled)
 
         ev = event(req, rid, sid, new_session, ip)
+        ev["chs"] = 1 if ctx["signalled"] # challenge signalled (contract §A3)
         ev["ts"] = ts0
         ev["st"] = status
         ev["dur"] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000).to_i
@@ -318,17 +335,10 @@ module Camada
       Answer.new(status: 403, headers: headers, body: html)
     end
 
-    # 403 + the proof-of-work page (HTML navigations) or 403 JSON (everything else), plus the
-    # `blk: "challenge"` event — a served challenge is reported like a block (contract §D2).
+    # 403 + the proof-of-work page, plus the `blk: "challenge"` event — a served challenge is
+    # reported like a block (contract §D2). Callers pass page loads only.
     def serve_challenge_answer(req, ip, sid)
-      to = Challenge.safe_return_to(req.path + req.query)
-      answer =
-        if Challenge.wants_html?(req.header("accept"), req.header("sec-fetch-dest"))
-          page(ip, to)
-        else
-          Answer.new(status: 403, headers: CHALLENGE_HEADERS.merge("content-type" => "application/json"),
-                     body: '{"error":"challenge_required"}')
-        end
+      answer = page(ip, Challenge.safe_return_to(req.path + req.query))
       begin
         ev = event(req, SecureRandom.uuid, sid, false, ip)
         ev["st"] = 403

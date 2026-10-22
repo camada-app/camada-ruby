@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- feat: a non-HTML request under a challenge row passes to the app instead of a 403 JSON `challenge_required`: its response carries `x-camada-challenge: 1` and `cache-control: no-store` (replacing the app's), and its event ships `chs: 1` whatever `sample` and `exclude` say. `serve_challenge` does the same for a non-page request and returns `nil`. (camada-all-7cgs)
+
 ## 0.1.5 - 2026-10-19
 
 - fix (security): a custom-rule `matches` regex never runs on a ua, header or path value over 2048 chars (UTF-16 units): over-cap fails closed, a hit for block/challenge/warn and a miss for skip/allow, never truncated (truncation would fail a deny rule open). (camada-all-q980)
