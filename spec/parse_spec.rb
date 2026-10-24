@@ -220,6 +220,14 @@ RSpec.describe Camada::Snapshot do
     end.not_to output.to_stderr
   end
 
+  it "counts an astral char as one char, unlike JS's two UTF-16 units (accepted gap, camada-all-vuvo)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    emoji = "\u{1F600}"
+    ["^.$", "^[^a]$", "^\\S$"].each { |p| expect(rx.call(p)).to match(emoji) }
+    ["^..$", "^.{2}$"].each { |p| expect(rx.call(p)).not_to match(emoji) }
+    expect(rx.call("^a.*b$")).to match("a#{emoji}b")
+  end
+
   it "never raises on a value the pattern cannot read" do
     m = rules_snapshot([{ "id" => "rx", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => "^\\w+$" }] }])
     expect(m.match(input(ua: "\xff".b)).block).to be(false) # a binary string no UTF-8 regex can read
