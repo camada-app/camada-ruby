@@ -165,7 +165,9 @@ RSpec.describe Camada::Snapshot do
       "^\\x4$" => [["x4", true]], "^\\x41$" => [["A", true]], "^A$" => [["A", true]],
       "^\\k$" => [["k", true]], "(?<n>a)\\k<n>" => [["aa", true]],
       "^[\\B]$" => [["B", true]], "^[\\p]$" => [["p", true]], "^[\\b]$" => [["\b", true]],
-      "^\\d\\w\\b" => [["1a", true]], "^\\u0041$" => [["A", true]]
+      "^\\d\\w\\b" => [["1a", true]], "^\\u0041$" => [["A", true]], "^admin$" => [["admin\n", false]],
+      "^\\c1$" => [["\\c1", true]], "^\\c$" => [["\\c", true]], "^[\\c1]$" => [["\x11", true]],
+      "^\\v$" => [["\v", true], ["\n", false]]
     }.each do |pat, cases|
       cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
     end
