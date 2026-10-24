@@ -230,6 +230,18 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.scan_groups('\2(a)')[1]).to be(false) # not a backreference with one group
   end
 
+  it "fails open on a pattern that is not a String" do
+    [nil, 42, ["a"]].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat.inspect }
+  end
+
+  it "pins an Onigmo divergence from node on an empty-bodied capture loop (accepted gap, camada-all-mx0s)" do
+    # node: /^(?:((x?[ab]*)+?[ab]){2})$/.test('aa') is true. Onigmo says false. If a Ruby upgrade flips
+    # this, update the README `matches` paragraph.
+    re = Camada::Snapshot.compile_regex("^(?:((x?[ab]*)+?[ab]){2})$")
+    expect(re).not_to be_nil
+    expect(re.match?("aa")).to be(false)
+  end
+
   it "fails open on a non-UTF-8 pattern (the binary walk misreads it)" do
     [["ソ(a)?x\\1".encode("Shift_JIS"), "a(b)?\\1".encode("UTF-16LE")]].flatten.each do |pat|
       expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat.encoding.to_s
