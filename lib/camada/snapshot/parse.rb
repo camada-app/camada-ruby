@@ -138,12 +138,14 @@ module Camada
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
-    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
+    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo). Onigmo also diverges from JS on a
+    # repeated capture group whose body can match empty, even with no backreference: `((x?[ab]*)+?[ab]){2}` on 'aa'
+    # matches in JS, not here (an accepted gap, camada-all-mx0s).
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
     # Only a UTF-8 or ASCII pattern is walked: snapshot patterns arrive as UTF-8 JSON, and the binary walk
     # misreads other encodings.
     def self.compile_regex(pattern, options = 0)
-      return nil unless pattern.encoding == Encoding::UTF_8 || pattern.ascii_only?
+      return nil unless pattern.is_a?(String) && (pattern.encoding == Encoding::UTF_8 || pattern.ascii_only?)
 
       bin = pattern.b # the one binary copy both walks read (O(1) indexing; the syntax is ASCII)
       scan = scan_groups(bin)
