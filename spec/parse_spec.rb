@@ -130,6 +130,28 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.compile_regex("[$^]x")).to match("$x")
   end
 
+  it "reads a non-JS brace as text" do
+    rx = ->(p) { Camada::Snapshot.compile_regex("\\A(?:#{p})\\z") }
+    expect(Camada::Snapshot.js_to_onigmo("a{,3}")).to eq("a\\{,3}")
+    expect(rx.call("a{,3}")).to match("a{,3}")
+    expect(rx.call("a{,3}")).not_to match("aa")
+    expect(rx.call("a{,}")).to match("a{,}")
+    expect(rx.call("a{,}")).not_to match("aaa")
+    expect(rx.call("a{1,3}")).to match("aaa")
+    expect(Camada::Snapshot.compile_regex("a{1,3}?").match("aaa")[0]).to eq("a")
+    expect(rx.call("[{,3}]")).to match(",")
+    expect(rx.call("\\{,3}")).to match("{,3}")
+    expect(rx.call("a{ 1}")).to match("a{ 1}")
+    expect(rx.call("x{")).to match("x{")
+    expect(rx.call("\\p{L}{,2}")).to match("a{,2}") # \p{L} keeps its braces
+    expect(rx.call("[^]{,2}")).to match("z{,2}")
+    # real path: Onigmo would read each `.{,2000}` as a bound and backtrack catastrophically
+    m = rules_snapshot([{ "id" => "bt", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => ".{,2000}.{,2000}.{,2000}!" }] }])
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    expect(m.match(input(ua: ["!", "a" * 2047].join)).rule).to be_nil
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).to be < 0.1
+  end
+
   it "never raises on a value the pattern cannot read" do
     m = rules_snapshot([{ "id" => "rx", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => "^\\w+$" }] }])
     expect(m.match(input(ua: "\xff".b)).block).to be(false) # a binary string no UTF-8 regex can read
