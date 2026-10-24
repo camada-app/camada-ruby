@@ -211,6 +211,19 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.js_to_onigmo("^a{2,3}$")).to eq("\\Aa{2,3}\\z")
   end
 
+  it "reads \\c in a class as a control char only before a letter, digit or _ (camada-all-mqcb)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    {
+      "^[\\c*]$" => [["\\", true], ["c", true], ["*", true], ["j", false]],
+      "^[\\c1]$" => [["\u0011", true], ["q", false]], "^[\\c_]$" => [["\u001f", true]],
+      "^[\\s-\\c-x]$" => [["-", true], ["\\", true], ["d", true], ["y", false]],
+      "^\\c1$" => [["\\c1", true]]
+    }.each do |pat, cases|
+      cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
+    end
+    ["[\\c]", "[\\c"].each { |p| expect { rx.call(p) }.not_to raise_error }
+  end
+
   it "fails open on an unterminated class after \\s-" do
     ["[a\\s-", "[\\s-"].each { |p| expect { expect(Camada::Snapshot.compile_regex(p)).to be_nil }.not_to raise_error }
   end
