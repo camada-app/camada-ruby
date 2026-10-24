@@ -329,6 +329,7 @@ module Camada
     ESC_ATOM = /\G\\(?:c[A-Za-z]|x\h{2}|u\h{4}|0[0-7]{0,2}|(?![bBc])(?:#{ANY_CHAR}))/n
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     NON_JS_GROUP = /\G\((?:\*|\?(?![:=!<]))/ # a `(?` or `(*` opening none of the JS forms `(?:` `(?=` `(?!` `(?<`
+    JS_NAME = /\A[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*\z/ # a JS group name
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
@@ -346,7 +347,9 @@ module Camada
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
-    # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
+    # `(?<name>` is copied verbatim once the name fits JS's grammar (JS_NAME); a name used twice is
+    # kept only when each pair sits in different alternatives of one disjunction, and then no
+    # backreference may exist. Anything else Ruby rejects still fails open.
     # Raises RegexpError on a group JS lacks (see compile_regex).
     # `scan` is the scan_groups result (default: scan the pattern). Walks a binary copy (O(1) indexing
     # on a non-ASCII pattern) and returns the pattern's encoding.
@@ -360,6 +363,10 @@ module Camada
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
       group_names, _, plan = scan || scan_groups(pattern)
       named = group_names.any?
+      open_groups = [[0, 0]] # [group id, alternative index] per open group, the root first
+      gid = 0
+      paths = Hash.new { |h, k| h[k] = [] } # name -> the open_groups snapshot at each of its openers
+      dup = false
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
@@ -394,6 +401,12 @@ module Camada
               next
             end
           end
+          if named && !in_class && l == "k" && (m = pattern.match(/\G\\k<([^>]*)>/n, i)) &&
+             m[1].dup.force_encoding(Encoding::UTF_8).match?(JS_NAME)
+            out << m[0] # a `$` in the name is no anchor
+            i += m[0].length
+            next
+          end
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
                  (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
@@ -418,6 +431,28 @@ module Camada
           ch = "\\#{ch}" if ch == "[" || ch == "&" # JS: `[[:alpha:]]` is {[ : a l p h} then `]`
         elsif ch == "(" && pattern.match?(NON_JS_GROUP, i)
           raise RegexpError, "non-JS group" # compile_regex fails open
+        elsif ch == "(" && (m = pattern.match(/\G\(\?<(?![=!])([^>]*)>/n, i))
+          nm = m[1].dup.force_encoding(Encoding::UTF_8)
+          raise RegexpError, "invalid group name" unless nm.valid_encoding? && nm.match?(JS_NAME)
+
+          seen = paths[nm]
+          seen.each do |q|
+            a, b = q.zip(open_groups).find { |x, y| x != y }
+            raise RegexpError, "duplicate group name" unless a && b && a[0] == b[0]
+
+            dup = true
+          end
+          seen << open_groups.map(&:dup)
+          open_groups << [gid += 1, 0]
+          out << m[0]
+          i += m[0].length
+          next
+        elsif ch == "("
+          open_groups << [gid += 1, 0]
+        elsif ch == "|"
+          open_groups.last[1] += 1
+        elsif ch == ")"
+          open_groups.pop if open_groups.length > 1
         elsif ch == "."
           out << JS_DOT
           i += 1
@@ -456,6 +491,8 @@ module Camada
         out << ch
         i += 1
       end
+      raise RegexpError, "duplicate group name with a backreference" if dup && pattern.match?(/\\[k1-9]/)
+
       out.force_encoding(enc)
     end
 
