@@ -140,7 +140,14 @@ module Camada
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     def self.compile_regex(pattern, options = 0)
-      Regexp.new(js_to_onigmo(pattern), options)
+      source = js_to_onigmo(pattern)
+      verbose = $VERBOSE
+      begin
+        $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
+        Regexp.new(source, options)
+      ensure
+        $VERBOSE = verbose
+      end
     rescue RegexpError, TypeError, ArgumentError, EncodingError
       nil
     end
