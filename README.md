@@ -180,7 +180,7 @@ JS's are not), `\d`/`\w`/`\b` are ASCII as in JS; a spelling Ruby still rejects 
 here (and never raises), while it does at the edge. An astral character (an emoji, say) is one
 character here and two UTF-16 units at the edge, so a pattern that counts characters around one
 (`^.$`, `.{2}`, `[^a]`, `\S`) or puts one in a class or before a quantifier can disagree; `.*`
-and a bare emoji agree. A repeated capture group whose body can match empty (a `(a*)+`-style loop) can
+and a bare emoji agree. A repeated capture group whose body can match empty (as in `((x?[ab]*)+?[ab]){2}`) can
 match differently here than at the edge: that is an Onigmo engine difference.
 
 ## Deploying it
