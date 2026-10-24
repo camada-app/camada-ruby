@@ -202,7 +202,8 @@ RSpec.describe Camada::Snapshot do
       "^[\\s-\\d-z]$" => [["b", false]], "^[\\s-ab-z]$" => [["c", true]], "^[a-\\s-z]$" => [["b", false], ["-", true]],
       "^[\\sa-]$" => [["-", true], ["a", true]], "^[a\\s-z]$" => [["-", true], ["m", false]],
       "^[\\s^]$" => [["^", true], [" ", true], ["a", false]], "^[^\\s^]$" => [["^", false], ["a", true]],
-      "^[\\S\\d]$" => [[" ", false], ["a", true]], "^[^\\S]$" => [[" ", true], ["a", false]]
+      "^[\\S\\d]$" => [[" ", false], ["a", true]], "^[^\\S]$" => [[" ", true], ["a", false]],
+      "(?<=[a\\s])b" => [[" b", true], ["ab", true], ["cb", false]], "(?<![a\\s])b" => [[" b", false], ["cb", true]]
     }.each do |pat, cases|
       cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
     end
