@@ -217,8 +217,8 @@ module Camada
             i += 2
             next
           end
-          if l == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
-            out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
+          if l == "c" && pattern[i + 2]&.match?(in_class ? /[A-Za-z0-9_]/ : /[A-Za-z]/) # JS Annex B: `[\c1]` too
+            out << Regexp.escape((pattern[i + 2].ord & 0x1F).chr)
             i += 3
             next
           end
@@ -231,7 +231,7 @@ module Camada
             end
           end
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
-                 (l == "k" && named) || (l == "c" && in_class && pattern[i + 2]&.match?(/[0-9_]/))
+                 (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           out << (kept ? pattern[i, 2] : l)
           i += 2
@@ -294,14 +294,10 @@ module Camada
     end
 
     def self.brace_quantifier(match)
-      lo = match[1].to_i
-      hi = match[3].to_s
-      return match[0] if lo <= ONIGMO_REPEAT_MAX && (hi.empty? || hi.to_i <= ONIGMO_REPEAT_MAX)
-
-      lo = [lo, ONIGMO_REPEAT_MAX].min
-      return "{#{lo}}" if match[2].nil?
-
-      hi.empty? || hi.to_i > ONIGMO_REPEAT_MAX ? "{#{lo},}" : "{#{lo},#{hi}}"
+      lo, comma, hi = match.captures
+      lo = ONIGMO_REPEAT_MAX.to_s if lo.to_i > ONIGMO_REPEAT_MAX
+      hi = "" if hi.to_i > ONIGMO_REPEAT_MAX # an upper bound past it never binds a real input
+      "{#{lo}#{comma}#{hi}}"
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
