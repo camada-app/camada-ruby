@@ -252,7 +252,6 @@ module Camada
           cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
           cur[:holds] ||= (cur[:zero] || cur[:rep]) && cur[:nullable] # it or a frame inside it: an optional nullable repeat
           cur[:parent][:holds] ||= cur[:holds]
-          cur[:opt] = cur[:rep] && (b.nil? || (b[2] && (b[3].empty? || canon_digits(b[1]) != canon_digits(b[3])))) # not {n} / {n,n}
           closed = cur
           cur = cur[:parent]
           cur[:solid] = true unless closed[:nullable] || closed[:zero] # the branch now holds an atom that must consume
@@ -280,7 +279,7 @@ module Camada
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
         f[:in_la] = f[:la] || p[:in_la] # inside a positive lookahead
-        f[:rn] = f[:opt] && f[:nullable] ? f : p[:rn] # innermost frame (or ancestor) with an optional iteration whose body can match empty
+        f[:rn] = f[:rep] && f[:nullable] ? f : p[:rn] # innermost repeating frame (or ancestor) whose body can match empty
       end
       dups = names.compact.tally.select { |_, c| c > 1 }
       plan = {}
@@ -508,15 +507,12 @@ module Camada
       digits.length > 1 || digits > "1"
     end
 
-    # canonical: no leading zeros, "0" stays
-    def self.canon_digits(digits) = digits&.sub(/\A0+(?=.)/, "")
-
     def self.binary(str)
       str.encoding == Encoding::BINARY ? str : str.b
     end
 
     def self.brace_quantifier(match)
-      lo, comma, hi = match.captures.map { |d| canon_digits(d) }
+      lo, comma, hi = match.captures.map { |d| d&.sub(/\A0+(?=.)/, "") } # canonical: no leading zeros
       # m > n is a JS SyntaxError: leave it as written for Onigmo to reject
       return match[0] if hi.to_s != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
 
