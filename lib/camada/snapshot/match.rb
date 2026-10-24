@@ -76,9 +76,10 @@ module Camada
         unless s.rules.empty?
           r = RuleRequest.new(n4: n4, ip6: w, asn: i.asn, country: i.country, tlsx: i.tlsx,
                               paths: forms, ua: i.ua, header: i.header)
-          s.rules.each do |rule| # the order IS the precedence (§A4): first match wins
-            return Snapshot.rule_result(rule, s.version) if rule.conds.all? { |cond| cond.call(r) }
+          hit = Snapshot.with_regex_budget do
+            s.rules.find { |rule| rule.conds.all? { |cond| cond.call(r) } } # the order IS the precedence (§A4): first match wins
           end
+          return Snapshot.rule_result(hit, s.version) if hit
         end
         reason = side(s.allow, i, n4, w, forms, false) # an exemption: every canonical spelling must agree
         return MatchResult.new(allowed: true, reason: reason, version: s.version) if reason
