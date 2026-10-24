@@ -145,34 +145,34 @@ module Camada
     end
 
     JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
+    JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
     # the control character, and the anchors: JS `^`/`$` bind the whole input while Ruby's are
     # line anchors, so outside a class they become `\A`/`\z`; a `{` that is no JS quantifier
-    # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound). `(?<name>` is native to
-    # Onigmo. Anything else Ruby rejects still fails open. JS (no u flag) reads `\<letter>` as the
-    # bare letter unless it is a class/escape (b B d D f n r s S t v w W, \cX, \xHH, \uHHHH, \k
-    # with a named group; in a class \B too), so `\p{L}` is the text "p{L}", not a property; and
-    # `x{n}?` is exact-n (Onigmo reads it as optional), so the `?` is dropped.
+    # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound), and `x{n}?` -> `x{n}` (JS
+    # reads it as exact-n, Onigmo as optional). `\<letter>` outside JS's escape set is the bare
+    # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `(?<name>` is native to
+    # Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
       out = +""
       i = 0
       n = pattern.length
       in_class = false
+      named = pattern.match?(/\(\?<(?![=!])/)
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
-          if pattern[i + 1] == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
+          l = pattern[i + 1]
+          if l == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
             out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
             i += 3
             next
           end
-          l = pattern[i + 1]
-          keep = !l.match?(/[A-Za-z]/) || "bdDfnrsStvwWc".include?(l) || (l == "B" && !in_class) ||
-                 (l == "x" && pattern.match?(/\G[0-9a-fA-F]{2}/, i + 2)) ||
-                 (l == "u" && pattern.match?(/\G[0-9a-fA-F]{4}/, i + 2)) ||
-                 (l == "k" && pattern.match?(/\(\?<[^=!]/))
-          out << (keep ? pattern[i, 2] : l)
+          kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
+                 (l == "k" && named) || (l == "c" && in_class)
+          l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
+          out << (kept ? pattern[i, 2] : l)
           i += 2
           next
         end
@@ -193,13 +193,11 @@ module Camada
           out << "\\z"
           i += 1
           next
-        elsif ch == "{" && !pattern.match?(JS_BRACE, i)
-          out << "\\{"
-          i += 1
-          next
-        elsif ch == "{" && (m = pattern.match(/\G\{[0-9]+\}(?=\?)/, i))
-          out << m[0]
-          i += m[0].length + 1
+        elsif ch == "{"
+          m = pattern.match(JS_BRACE, i)
+          out << (m ? m[0] : "\\{")
+          i += m ? m[0].length : 1
+          i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
         end
         out << ch
