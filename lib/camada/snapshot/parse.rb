@@ -155,7 +155,7 @@ module Camada
     # repeated capture group whose body can match empty, even with no backreference: `((x?[ab]*)+?[ab]){2}` on 'aa'
     # matches in JS, not here (an accepted gap, camada-all-mx0s).
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
-    # An inline flag group (`(?i:...)`, `(?i)`) fails open too: JS rejects it or V8 mis-evaluates it (camada-all-lsl8).
+    # A `(?` or `(*` group JS lacks (`(?i)`, `(?>`, `(*FAIL)`, ...) fails open too: JS rejects it or V8 mis-evaluates it (camada-all-lsl8).
     # Only a UTF-8 or ASCII pattern is walked: snapshot patterns arrive as UTF-8 JSON, and the binary walk
     # misreads other encodings.
     def self.compile_regex(pattern, options = 0)
@@ -328,7 +328,7 @@ module Camada
     # An unsure escape is no match: calling it nullable only fails open, splitting an atom would not.
     ESC_ATOM = /\G\\(?:c[A-Za-z]|x\h{2}|u\h{4}|0[0-7]{0,2}|(?![bBc])(?:#{ANY_CHAR}))/n
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
-    NON_JS_GROUP = /\G\([?*](?![:=!<])/ # a `(?` or `(*` that opens none of the (? forms JS has: `(?:` `(?=` `(?!` `(?<`
+    NON_JS_GROUP = /\G\((?:\*|\?(?![:=!<]))/ # a `(?` or `(*` opening none of the JS forms `(?:` `(?=` `(?!` `(?<`
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
@@ -347,7 +347,7 @@ module Camada
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
-    # Raises RegexpError on an inline flag group (see compile_regex).
+    # Raises RegexpError on a group JS lacks (see compile_regex).
     # `scan` is the scan_groups result (default: scan the pattern). Walks a binary copy (O(1) indexing
     # on a non-ASCII pattern) and returns the pattern's encoding.
     def self.js_to_onigmo(pattern, scan = nil)

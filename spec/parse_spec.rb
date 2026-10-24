@@ -265,7 +265,7 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
-  it "fails open on an inline flag group, which JS rejects or V8 mis-evaluates (camada-all-lsl8)" do
+  it "fails open on a (? or (* group JS lacks, which JS rejects or V8 mis-evaluates (camada-all-lsl8)" do
     ['(?:(a{0,2}))((\\b\\3)*?)?(?i:\\1|[^a]*)+?', "(?i:googlebot|bingbot)", "(?-i:a)", "(?s:.)", "(?m:a$)",
      "(?i-m:a)", "x(?i:a)", "a(?i)b", "(?i)admin", "(?x:a b)", "(?^i:a)", "(?-i)a", "(?s)a.b", "(?R)",
      "x(?im-s)y", "(?>a+)b", "(?#c)a", "(a)?(?(1)b)", "(?'n'a)", "(?~a)", "(?|a|b)", "(?P<n>a)(?P=n)",
