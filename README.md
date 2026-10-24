@@ -177,7 +177,9 @@ at this position covers ip, path, user-agent and header conditions — ASN, coun
 fail open in-app. `matches` patterns are JS regexes read by Ruby's Onigmo: named groups are
 native, `[^]` and `\cX` are translated, `^`/`$` become `\A`/`\z` (Ruby's are line anchors,
 JS's are not), `\d`/`\w`/`\b` are ASCII as in JS; a spelling Ruby still rejects never matches
-here (and never raises), while it does at the edge.
+here (and never raises), while it does at the edge. An astral character (an emoji, say) is one
+character here and two UTF-16 units at the edge, so a pattern that counts characters around one
+(`^.$`, `.{2}`, `[^a]`, `\S`) can disagree; `.*` and literal text agree.
 
 ## Deploying it
 
