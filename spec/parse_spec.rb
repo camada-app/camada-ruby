@@ -420,4 +420,17 @@ RSpec.describe "Camada::Snapshot matches cap" do
     rx = Camada::Snapshot.compile_regex("^[ \\s]+x")
     expect(Camada::Snapshot.regex_hit?(rx, " " * 3000)).to be(false)
   end
+
+  it "compiles classes that repeat a \\s member without an Onigmo warning under -w" do
+    verbose = $VERBOSE
+    begin
+      $VERBOSE = true
+      ["[a\\S]", "[^a\\S]", "[\\s\\t]", "[\\s ]"].each do |src|
+        expect { Camada::Snapshot.compile_regex(src) }.not_to output.to_stderr
+      end
+    ensure
+      $VERBOSE = verbose
+    end
+    expect(Camada::Snapshot.compile_regex("[\\s\\t]x")).to match("\tx")
+  end
 end
