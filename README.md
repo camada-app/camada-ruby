@@ -179,7 +179,8 @@ native, `[^]` and `\cX` are translated, `^`/`$` become `\A`/`\z` (Ruby's are lin
 JS's are not), `\d`/`\w`/`\b` are ASCII as in JS; a spelling Ruby still rejects never matches
 here (and never raises), while it does at the edge. An astral character (an emoji, say) is one
 character here and two UTF-16 units at the edge, so a pattern that counts characters around one
-(`^.$`, `.{2}`, `[^a]`, `\S`) can disagree; `.*` and literal text agree.
+(`^.$`, `.{2}`, `[^a]`, `\S`) or puts one in a class or before a quantifier can disagree; `.*`
+and a bare emoji agree.
 
 ## Deploying it
 
