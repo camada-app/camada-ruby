@@ -267,7 +267,8 @@ RSpec.describe Camada::Snapshot do
 
   it "fails open on a JS modifier group, which V8 mis-evaluates (camada-all-lsl8)" do
     ['(?:(a{0,2}))((\\b\\3)*?)?(?i:\\1|[^a]*)+?', "(?i:googlebot|bingbot)", "(?-i:a)", "(?s:.)", "(?m:a$)",
-     "(?i-m:a)", "x(?i:a)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+     "(?i-m:a)", "x(?i:a)", "a(?i)b", "(?i)admin", "(?x:a b)", "(?^i:a)", "(?-i)a", "(?s)a.b", "(?R)",
+     "x(?im-s)y"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
     expect(Camada::Snapshot.compile_regex("(?i:a)", Regexp::IGNORECASE)).to be_nil
   end
 
@@ -275,6 +276,8 @@ RSpec.describe Camada::Snapshot do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call("[(?i:a)]")).to match("i")
     expect(rx.call("\\(?i:a\\)")).to match("(i:a)")
+    expect(rx.call("[(?i)]")).to match("i")
+    expect(rx.call("\\(?i\\)")).to match("(i)")
     ["(?:a)", "(?<n>a)", "(?=a)", "(?<!a)b"].each { |pat| expect(rx.call(pat)).not_to be_nil, pat }
   end
 
