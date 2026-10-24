@@ -140,7 +140,11 @@ module Camada
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
+    # Only a UTF-8 or ASCII pattern is walked: snapshot patterns arrive as UTF-8 JSON, and the binary walk
+    # misreads other encodings.
     def self.compile_regex(pattern, options = 0)
+      return nil unless pattern.encoding == Encoding::UTF_8 || pattern.ascii_only?
+
       bin = pattern.b # the one binary copy both walks read (O(1) indexing; the syntax is ASCII)
       scan = scan_groups(bin)
       return nil if scan[1]
@@ -164,8 +168,11 @@ module Camada
     # it (forward or self) is always empty in JS: kind :empty, written `(?:)`. One to a group that may not have
     # captured (it or an enclosing group is followed by a min-0 quantifier or sits in a negative lookaround, or
     # it lies in an alternation branch: a `|` in an enclosing group or at top level) becomes the conditional
-    # `(?(N)\N)` (kind :cond; unset reads as empty), unless a strict ancestor of the group repeats: the per-iteration
-    # reset then diverges, so fail open. A backreference inside a lookbehind, or to a group with a lookbehind
+    # `(?(N)\N)` (kind :cond; unset reads as empty), unless the group or an ancestor repeats (an empty last iteration
+    # makes Onigmo overwrite the capture, JS rejects that iteration and keeps it and the per-iteration reset
+    # diverges) or a min-0 quantifier covers a positive lookahead around it (the same empty iteration, its capture
+    # kept by Onigmo): fail open. So does a backward reference to a name two groups share (JS allows that in
+    # separate branches; Onigmo reads another group). A backreference inside a lookbehind, or to a group with a lookbehind
     # ancestor, fails open too: JS matches a lookbehind right to left ("closed before the reference" is backwards
     # there; a quantified group keeps its leftmost repetition). Beside named groups, a `\k<name>` naming no group
     # is a JS SyntaxError: fail open (Onigmo aborts the process on it).
@@ -194,7 +201,7 @@ module Camada
         elsif ch == "["
           in_class = true
         elsif ch == "("
-          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i) }
+          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i), la: pattern.match?(/\G\(\?=/, i) }
           frames << cur
           if pattern[i + 1] != "?"
             groups << cur
@@ -220,7 +227,10 @@ module Camada
         f[:in_lb] = f[:lb] || p[:in_lb]
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
+        f[:zero_at] = f[:zero] || p[:zero_at] # it or an ancestor has a min-0 quantifier
+        f[:la_opt] = p[:la_opt] || (f[:la] && f[:zero_at]) # inside a positive lookahead that a min-0 quantifier covers
       end
+      dups = names.compact.tally.select { |_, c| c > 1 }
       plan = {}
       diverges = refs.any? do |pos, ref, home, stop|
         next named if ref == :bad # a `\k` not followed by `<name>`: a SyntaxError beside named groups
@@ -239,8 +249,9 @@ module Camada
           plan[pos] = [stop, :empty] # never captured yet: empty, and a quantifier after it keeps its atom
           next false
         end
+        next true if g[:name] && dups[g[:name]] # JS allows a name in two branches; Onigmo reads another group
         next false unless g[:unset]
-        next true if g[:rep_above]
+        next true if g[:rep_above] || g[:rep] || g[:la_opt]
 
         plan[pos] = [stop, :cond]
         false

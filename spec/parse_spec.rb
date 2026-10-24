@@ -206,14 +206,17 @@ RSpec.describe Camada::Snapshot do
     expect(rx.call('[(?<]\k<n>').match?("(k<n>")).to be(true)
     expect(rx.call('\(?<x>\k<n>').match?("(<x>k<n>")).to be(true)
     ['^(?:(?<n>a)|b)+\k<n>$', '(?<=(a)\1)b', '(?<=([ab]){2})\1', '(?<=(a))\1', '(?<=\1(a))b',
-     '(?<m>)|\k<n>', '(?:(a)|b)+\1', '(?:(a)|b){2}\1', '(?:(?<n>a)?)*\k<n>', 'a\k<n>(?<m>b)'].each do |pat|
+     '(?<m>)|\k<n>', '(?:(a)|b)+\1', '(?:(a)|b){2}\1', '(?:(?<n>a)?)*\k<n>', 'a\k<n>(?<m>b)',
+     '(a)*\1', '(a)*x\1', '(a){0,2}x\1', # an empty last iteration (node rejects it, Onigmo takes it)
+     '(b*)*x\1', '(b|)*x\1', '(a?){0,2}x\1', '(?:(?=(a)))?a\1', '(?=(a))?a\1', '(?=(a)){0,1}a\1',
+     '(?<a>x)(?=(?<b>y))?y\k<b>', # a capture in a lookahead a min-0 quantifier covers
+     '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1'].each do |pat|
       expect(rx.call(pat)).to(be_nil, pat)
     end
     # node's answers (new RegExp("^(?:" + pat + ")$").test(s)): [matching, not matching]
     { '(a)?x\1' => [%w[x axa], %w[ax]], '(?:(a)|b)\1' => [%w[aa b], %w[ba a]],
       '(?<q>["\'])?x\k<q>' => [["x", '"x"', "'x'"], ['"x', %('x")]], '\1(a)' => [%w[a], %w[aa]], '(a\1)' => [%w[a], %w[aa]],
-      '(?:\1(a))+' => [%w[a aa], []], '(a)|b\1' => [%w[b a], %w[ab]], '(a)*x\1' => [%w[x axa], %w[ax]],
-      '(a){0,2}x\1' => [%w[x axa], %w[ax]], '(a){00}x\1' => [%w[x], %w[xa]], '(?!(a))\1b' => [%w[b], %w[ab]],
+      '(?:\1(a))+' => [%w[a aa], []], '(a)|b\1' => [%w[b a], %w[ab]], '(a){00}x\1' => [%w[x], %w[xa]], '(?!(a))\1b' => [%w[b], %w[ab]],
       '(?:(a)\1|b)' => [%w[aa b], %w[a]], '(?<m>)|\k<n>(?<n>b)' => [["", "b"], []], '\k<n>(?<n>b)' => [%w[b], []],
       'a|\k<n>(?<n>b)' => [%w[a b], []], '(a|b)\1' => [%w[aa bb], %w[ab]], '(a)+\1' => [%w[aaa], []],
       '(?:(a)\1)+' => [%w[aaaa], []], '(?<n>a)\k<n>' => [%w[aa], []], '(?<n>a)\1' => [%w[aa], []],
@@ -224,6 +227,13 @@ RSpec.describe Camada::Snapshot do
     end
     expect(rx.call('[\1](a)').match?("\x01a")).to be(true)
     expect(Camada::Snapshot.scan_groups('\2(a)')[1]).to be(false) # not a backreference with one group
+  end
+
+  it "fails open on a non-UTF-8 pattern (the binary walk misreads it)" do
+    [["ソ(a)?x\\1".encode("Shift_JIS"), "a(b)?\\1".encode("UTF-16LE")]].flatten.each do |pat|
+      expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat.encoding.to_s
+    end
+    expect(Camada::Snapshot.compile_regex("a(b)?x\\1".encode("US-ASCII"))).not_to be_nil
   end
 
   it "classifies deeply nested backreferences in linear time" do
