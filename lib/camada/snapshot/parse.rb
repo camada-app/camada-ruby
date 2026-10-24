@@ -137,7 +137,8 @@ module Camada
     # A pattern this runtime rejects never matches, and never throws (fail open). Patterns are
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
-    # Ruby by default, as JS reads them.
+    # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
+    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     def self.compile_regex(pattern, options = 0)
       Regexp.new(js_to_onigmo(pattern), options)
     rescue RegexpError, TypeError, ArgumentError, EncodingError
@@ -148,7 +149,6 @@ module Camada
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
     JS_ATOM = /\G(?:\\(?:c[A-Za-z]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|[\s\S])|[\s\S])/ # one class atom
-    # An astral char stays one `.` here, two in JS (accepted gap, camada-all-vuvo).
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
