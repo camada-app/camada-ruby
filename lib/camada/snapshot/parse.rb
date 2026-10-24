@@ -141,9 +141,10 @@ module Camada
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     # A backreference to a group that may not have captured diverges from JS: fail open (scan_groups).
     def self.compile_regex(pattern, options = 0)
-      return nil if scan_groups(pattern).last
+      group_names, diverges = scan_groups(pattern)
+      return nil if diverges
 
-      source = js_to_onigmo(pattern)
+      source = js_to_onigmo(pattern, group_names)
       verbose = $VERBOSE
       begin
         $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
@@ -163,6 +164,8 @@ module Camada
     # sits in a negative lookaround, or it lies in an alternation branch (a `|` in an enclosing group
     # or at top level). Deliberately conservative: `(?:(a)\1|b)` diverges too.
     def self.scan_groups(pattern)
+      return [[], false] unless pattern.match?(/\\[1-9k]/) # no reference: nothing reads the names or can diverge
+
       cur = { parent: nil }
       groups = [] # capture groups in number order
       refs = [] # [position, number or name]
@@ -188,7 +191,7 @@ module Camada
           end
         elsif ch == ")" && cur[:parent]
           cur[:end] = i
-          cur[:zero] = pattern.match?(/\G(?:[?*]|\{0+(?:,[0-9]*)?\})/, i + 1)
+          cur[:zero] = pattern.match?(/\G[?*]/, i + 1) || ((b = pattern.match(JS_BRACE, i + 1)) && b[1].delete("0").empty?)
           cur = cur[:parent]
         elsif ch == "|"
           cur[:alt] = true
@@ -196,10 +199,10 @@ module Camada
         i += 1
       end
       names = groups.map { |g| g[:name] }
-      named = names.any?
+      index = names.each_with_index.reverse_each.to_h # name => first group number - 1
       diverges = refs.any? do |pos, ref|
         k = if ref.is_a?(String)
-              named ? names.index(ref) : nil
+              index[ref]
             else
               ref <= groups.length ? ref - 1 : nil
             end
@@ -239,13 +242,13 @@ module Camada
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
-    def self.js_to_onigmo(pattern)
+    def self.js_to_onigmo(pattern, group_names = nil)
       out = +""
       i = 0
       n = pattern.length
       in_class = false
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
-      group_names = scan_groups(pattern).first
+      group_names ||= scan_groups(pattern).first
       named = group_names.any?
       while i < n
         ch = pattern[i]
