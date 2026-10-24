@@ -250,6 +250,8 @@ module Camada
           cur[:zero] = min_zero?(pattern, i + 1)
           cur[:nullable] ||= !cur[:solid] || cur[:lb] || cur[:la] || cur[:neg] # a lookaround consumes nothing
           cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
+          cur[:holds] ||= (cur[:zero] || cur[:rep]) && cur[:nullable] # it or a frame inside it: an optional nullable repeat
+          cur[:parent][:holds] ||= cur[:holds]
           closed = cur
           cur = cur[:parent]
           cur[:solid] = true unless closed[:nullable] || closed[:zero] # the branch now holds an atom that must consume
@@ -270,9 +272,6 @@ module Camada
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
       named = names.any?
-      frames.drop(1).reverse_each do |f| # children before parents
-        f[:parent][:holds] ||= f[:holds] || ((f[:zero] || f[:rep]) && f[:nullable]) # holds an optional nullable repeat
-      end
       frames.drop(1).each do |f|
         p = f[:parent]
         f[:la_div] = (f[:la] && f[:holds]) || p[:la_div]
