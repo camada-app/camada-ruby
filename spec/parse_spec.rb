@@ -184,6 +184,10 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
+  it "fails open on an unterminated class after \\s-" do
+    ["[a\\s-", "[\\s-"].each { |p| expect { expect(Camada::Snapshot.compile_regex(p)).to be_nil }.not_to raise_error }
+  end
+
   it "reads JS ., [] and \\s/\\S as JS does" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     {
@@ -191,8 +195,8 @@ RSpec.describe Camada::Snapshot do
       "^\\.$" => [[".", true], ["a", false]], "^[.]$" => [[".", true], ["a", false]],
       "[]a]" => [["a", false], ["]", false], ["a]", false]],
       "^[^]x]$" => [["qx]", true], ["x", false]], "a[]*b" => [["ab", true]],
-      "^\\s$" => [[" ", true], ["\u00a0", true], ["\ufeff", true], ["a", false]],
-      "^\\S$" => [[" ", false], ["\u3000", false], ["a", true]],
+      "^\\s$" => [[" ", true], ["\u2028", true], ["\u00a0", true], ["\ufeff", true], ["a", false]],
+      "^\\S$" => [[" ", false], ["\u2028", false], ["\u3000", false], ["a", true]],
       "^[a\\s]$" => [["\u00a0", true], ["a", true], ["b", false]],
       "^[^a\\s]$" => [["\u00a0", false], ["a", false], ["b", true]],
       "^[a-\\sz]$" => [["-", true], ["m", false], ["z", true], [" ", true]],

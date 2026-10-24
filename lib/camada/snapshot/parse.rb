@@ -200,7 +200,8 @@ module Camada
           end
           if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
             if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
-              solo_end = i + 1 + pattern.match(JS_ATOM, i + 1)[0].length
+              m = pattern.match(JS_ATOM, i + 1) # nil when the pattern ends on the dash
+              solo_end = m ? i + 1 + m[0].length : pattern.length
             end
             ch = "\\-"
           end
