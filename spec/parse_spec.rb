@@ -206,7 +206,8 @@ RSpec.describe Camada::Snapshot do
     expect(rx.call('[(?<]\k<n>').match?("(k<n>")).to be(true)
     expect(rx.call('\(?<x>\k<n>').match?("(<x>k<n>")).to be(true)
     ['^(?:(?<n>a)|b)+\k<n>$', '(?<q>["\'])?x\k<q>', '\1(a)', '(a\1)', '(?:\1(a))+', '(?:(a)|b)\1', '(a)|b\1', '(a)?x\1',
-     '(a)*x\1', '(a){0,2}x\1', '(a){00}x\1', '(?!(a))\1b', '(?<!(a))\1b', '(?:(a)\1|b)'].each do |pat|
+     '(a)*x\1', '(a){0,2}x\1', '(a){00}x\1', '(?!(a))\1b', '(?<!(a))\1b', '(?:(a)\1|b)',
+     '(?<=(a)\1)b', '(?<=([ab]){2})\1', '(?<=(a))\1', '(?<=\1(a))b', '(?<m>)|\k<n>', 'a|\k<n>(?<n>b)'].each do |pat|
       expect(rx.call(pat)).to(be_nil, pat)
     end
     { '(a|b)\1' => %w[aa bb], '(a)+\1' => %w[aaa], '(?:(a)\1)+' => %w[aaaa], '(?<n>a)\k<n>' => %w[aa], '(?<n>a)\1' => %w[aa],
@@ -215,6 +216,14 @@ RSpec.describe Camada::Snapshot do
     end
     expect(rx.call('(a|b)\1').match?("ab")).to be(false)
     expect(Camada::Snapshot.scan_groups('\2(a)').last).to be(false) # not a backreference with one group
+  end
+
+  it "scans a run of \\k< openers in linear time (literal text without a named group)" do
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    rx = Camada::Snapshot.compile_regex("#{"\\k<" * 20_000}>")
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 1
+    expect(rx).not_to be_nil
+    expect(Camada::Snapshot.compile_regex("#{"\\k<" * 3}>").match?("k<k<k<>")).to be(true)
   end
 
   it "clamps a JS quantifier bound above Onigmo's 100000 (camada-all-yh2t)" do
