@@ -146,6 +146,8 @@ module Camada
 
     JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
+    JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
+    JS_ATOM = /\G(?:\\(?:c[A-Za-z]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|[\s\S])|[\s\S])/ # one class atom
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
@@ -175,10 +177,10 @@ module Camada
           l = pattern[i + 1]
           if l == "s" || l == "S"
             if in_class
-              pulled << l
+              pulled << JS_SPACE[l]
               pull_end = i + 2
             else
-              out << "[#{"^" if l == "S"}#{JS_WS}]"
+              out << JS_SPACE[l]
             end
             i += 2
             next
@@ -198,14 +200,13 @@ module Camada
         if in_class
           if ch == "]"
             in_class = false
-            close_js_class(out, cstart, neg, pulled)
+            pulled.empty? ? out << "]" : close_js_class(out, cstart, neg, pulled)
             i += 1
             next
           end
           if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
             if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
-              m = pattern[i + 1] == "\\" && pattern.match(JS_ESCAPE, i + 2)
-              solo_end = i + (pattern[i + 1] == "\\" ? 3 : 2) - (m ? 1 : 0) + (m ? m[0].length : 0)
+              solo_end = i + 1 + pattern.match(JS_ATOM, i + 1)[0].length
             end
             ch = "\\-"
           end
@@ -255,10 +256,12 @@ module Camada
     # Rebuild a JS class that held \s/\S as the union of its body and those sets.
     def self.close_js_class(out, cstart, neg, pulled)
       body = out.slice!(cstart..)[(neg ? 2 : 1)..]
-      return out << "[#{"^" if neg}#{body}]" if pulled.empty?
+      pulled = pulled.uniq
+      any = pulled.size == 2 # \s and \S together: any char
+      return out << (neg ? "(?!)" : "[\\s\\S]") if any
 
       body = "\\#{body}" if body.start_with?("^")
-      alts = pulled.uniq.map { |l| "[#{"^" if l == "S"}#{JS_WS}]" }
+      alts = pulled.dup
       alts.unshift("[#{body}]") unless body.empty?
       u = alts.join("|")
       look = neg ? "!" : "="
