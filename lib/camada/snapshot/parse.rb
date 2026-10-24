@@ -295,9 +295,14 @@ module Camada
 
     def self.brace_quantifier(match)
       lo, comma, hi = match.captures
-      lo = ONIGMO_REPEAT_MAX.to_s if lo.to_i > ONIGMO_REPEAT_MAX
-      hi = "" if hi.to_i > ONIGMO_REPEAT_MAX # an upper bound past it never binds a real input
+      lo = ONIGMO_REPEAT_MAX.to_s if over_repeat_max?(lo)
+      hi = "" if over_repeat_max?(hi) # an upper bound past it never binds a real input
       "{#{lo}#{comma}#{hi}}"
+    end
+
+    def self.over_repeat_max?(digits)
+      digits = digits.to_s.sub(/\A0+/, "") # nil: `{m}` has no upper bound
+      digits.length > 6 || digits.to_i > ONIGMO_REPEAT_MAX # length first: to_i on a huge digit string is slow
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
