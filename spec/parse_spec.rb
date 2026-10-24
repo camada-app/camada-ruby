@@ -131,7 +131,7 @@ RSpec.describe Camada::Snapshot do
   end
 
   it "reads a non-JS brace as text" do
-    rx = ->(p) { Camada::Snapshot.compile_regex("\\A(?:#{p})\\z") }
+    rx = ->(p) { Camada::Snapshot.compile_regex("^(?:#{p})$") }
     expect(Camada::Snapshot.js_to_onigmo("a{,3}")).to eq("a\\{,3}")
     expect(rx.call("a{,3}")).to match("a{,3}")
     expect(rx.call("a{,3}")).not_to match("aa")
@@ -149,6 +149,39 @@ RSpec.describe Camada::Snapshot do
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     expect(m.match(input(ua: "!#{"a" * 2047}")).rule).to be_nil
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).to be < 0.1
+  end
+
+  it "reads JS identity escapes as the letter and {n}? as exact-n" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    {
+      "^\\p{L}$" => [["p{L}", true], ["A", false]],
+      "^\\x{41}$" => [["A", false]], "^\\x{2}$" => [["xx", true]],
+      "^\\u{41}$" => [["A", false]], "^\\u{2}$" => [["uu", true]], "^\\u{1F600}$" => [["u{1F600}", true]],
+      "^\\o{101}$" => [["A", false]], "^\\o{2}$" => [["oo", true]],
+      "^\\g{1}$" => [["g", true], ["gg", false]],
+      "^\\Qa.b$" => [["Qa.b", true], ["Qaxb", true]],
+      "^a{2}?$" => [["", false], ["aa", true]], "^a{2,3}?$" => [["aaa", true], ["a", false]],
+      "^\\A\\z$" => [["Az", true]], "^\\e$" => [["e", true]], "^\\h$" => [["h", true]],
+      "^\\x4$" => [["x4", true]], "^\\x41$" => [["A", true]], "^A$" => [["A", true]],
+      "^\\k$" => [["k", true]], "(?<n>a)\\k<n>" => [["aa", true]],
+      "^[\\B]$" => [["B", true]], "^[\\p]$" => [["p", true]], "^[\\b]$" => [["\b", true]],
+      "^\\d\\w\\b" => [["1a", true]], "^\\u0041$" => [["A", true]], "^admin$" => [["admin\n", false]],
+      "^\\c1$" => [["\\c1", true]], "^\\c$" => [["\\c", true]], "^[\\c1]$" => [["\x11", true]],
+      "^\\v$" => [["\v", true], ["\n", false]]
+    }.each do |pat, cases|
+      cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
+    end
+    expect(Camada::Snapshot.js_to_onigmo("\\x{2}?")).to eq("x{2}")
+    expect(Camada::Snapshot.compile_regex("a{2,3}?").match("aaa")[0]).to eq("aa")
+    %w[\\p{L} \\u{1F600}].each do |pat|
+      expect do
+        old = $VERBOSE
+        $VERBOSE = true
+        Camada::Snapshot.compile_regex(pat)
+      ensure
+        $VERBOSE = old
+      end.not_to output.to_stderr
+    end
   end
 
   it "never raises on a value the pattern cannot read" do
