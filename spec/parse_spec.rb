@@ -128,6 +128,19 @@ RSpec.describe Camada::Snapshot do
     expect(m3.match(input(ua: "x\nbot\ny")).rule).to be_nil
     expect(m3.match(input(ua: "a$b\nbot")).rule).to be_nil
     expect(Camada::Snapshot.compile_regex("[$^]x")).to match("$x")
+    # JS has no nested or POSIX classes and no `&&`: `[[:alpha:]]` is {[ : a l p h} then `]` (checked against node)
+    posix = Camada::Snapshot.compile_regex("[[:alpha:]]")
+    expect(posix).not_to be_nil
+    expect(posix).not_to match("b")
+    expect(posix).to match("a]")
+    expect(posix).to match(":]")
+    nested = Camada::Snapshot.compile_regex("[a[b]]")
+    expect(nested).to match("a]")
+    expect(nested).to match("[]")
+    expect(nested).not_to match("b")
+    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("&")
+    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("a")
+    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("b")
   end
 
   it "reads a non-JS brace as text" do
