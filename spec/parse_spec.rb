@@ -211,7 +211,10 @@ RSpec.describe Camada::Snapshot do
      '(b*)*x\1', '(b|)*x\1', '(a?){0,2}x\1', '(?:(?=(a)))?a\1', '(?=(a))?a\1', '(?=(a)){0,1}a\1',
      '(?<a>x)(?=(?<b>y))?y\k<b>', # a capture in a lookahead a min-0 quantifier covers
      '(?=(a??)?)\1a', '(?=(?:a??)?(b)?)a\1', '(?=(a*?){0,1})[ab]*\1', '(?=x(?<n>a??(x)*|){0,1})x\k<n>', # a conditional reference into a lookahead
-     '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1'].each do |pat|
+     '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1',
+     '(b*)+x\1', '(b|)+x\1', '(a?)+x\1', '\1(b*)+x\1', '(?:(b*))+x\1', '(?<m>b*)+x\k<m>', # a plain reference to a repeat that can match empty
+     '(\x41?)+x\1', '(é?)+x\1', '([a]?)+x\1', '(a{0,2})+x\1',
+     '(?:(?<a>b*)\k<a>)+x\k<a>'].each do |pat|
       expect(rx.call(pat)).to(be_nil, pat)
     end
     # node's answers (new RegExp("^(?:" + pat + ")$").test(s)): [matching, not matching]
@@ -221,7 +224,9 @@ RSpec.describe Camada::Snapshot do
       '(?:(a)\1|b)' => [%w[aa b], %w[a]], '(?<m>)|\k<n>(?<n>b)' => [["", "b"], []], '\k<n>(?<n>b)' => [%w[b], []],
       'a|\k<n>(?<n>b)' => [%w[a b], []], '(a|b)\1' => [%w[aa bb], %w[ab]], '(a)+\1' => [%w[aaa], []],
       '(?:(a)\1)+' => [%w[aaaa], []], '(?<n>a)\k<n>' => [%w[aa], []], '(?<n>a)\1' => [%w[aa], []],
-      '(a){1,2}\1' => [%w[aaa], []] }.each do |pat, (yes, no)|
+      '(a){1,2}\1' => [%w[aaa], []], '(a)+x\1' => [%w[axa], %w[ax]], '(\w)+\1' => [%w[aa abb], %w[a ab]],
+      '(?:(b)c?)+x\1' => [%w[bxb bcbxb], %w[bx]], '(a{1,2})+x\1' => [%w[axa aaxa], %w[ax]],
+      '(\x41)+x\1' => [%w[AxA], %w[Ax]], '(?:(a?)\1)+' => [["", "aa", "aaaa"], %w[a aaa]] }.each do |pat, (yes, no)|
       re = rx.call("^(?:#{pat})$")
       yes.each { |s| expect(re&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
       no.each { |s| expect(re&.match?(s)).to(be(false), "#{pat} on #{s.inspect}") }
