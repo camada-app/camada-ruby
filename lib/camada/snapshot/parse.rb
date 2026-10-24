@@ -218,9 +218,9 @@ module Camada
           elsif (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
             refs << [i, m[3] ? :bad : m[1] || m[2].to_i, cur, m.end(0)]
             i = m.end(0) - 2 # the reference is no atom: skip its name or digits (the loop's step and the one below)
-          elsif (e = escape_atom_end(pattern, i))
-            cur[:solid] = true unless min_zero?(pattern, e)
-            i = e - 2
+          elsif (m = ESC_ATOM.match(pattern, i))
+            cur[:solid] = true unless min_zero?(pattern, m.end(0))
+            i = m.end(0) - 2
           end
           i += 1
         elsif in_class
@@ -258,7 +258,7 @@ module Camada
           i = b.end(0) - 1 # a quantifier, not an atom
         elsif ch.ord >= 0xC0 || (ch.ord < 0x80 && !"^$?*+".include?(ch))
           e = i + 1
-          e += 1 while e < pattern.length && pattern[e].ord.between?(0x80, 0xBF)
+          e += 1 while e < pattern.length && pattern.getbyte(e).between?(0x80, 0xBF)
           cur[:solid] = true unless min_zero?(pattern, e)
           i = e - 1
         end
@@ -295,13 +295,10 @@ module Camada
           next false
         end
         next true if g[:name] && dups[g[:name]] # JS allows a name in two branches; Onigmo reads another group
+        # a repeat that can match empty: Onigmo's last empty iteration overwrites the capture, JS keeps it
+        next true if (rn = g[:rn]) && rn[:end] < pos
 
-        unless g[:unset]
-          rn = g[:rn] # a repeat that can match empty: Onigmo's last empty iteration overwrites the capture, JS keeps it
-          next !rn[:end].nil? && rn[:end] < pos if rn # a reference inside that repeat reads its own iteration's capture
-
-          next false
-        end
+        next false unless g[:unset]
         next true if g[:rep_above] || g[:rep] || g[:in_la]
 
         plan[pos] = [stop, :cond]
@@ -312,26 +309,12 @@ module Camada
 
     # Whether the text at j starts a min-0 quantifier (`?`, `*`, `{0}`, `{0,}`, `{0,m}`).
     def self.min_zero?(pattern, j)
-      return true if pattern.match?(/\G[?*]/, j)
+      c = pattern.getbyte(j)
+      return true if c == 0x3F || c == 0x2A # ? *
+      return false unless c == 0x7B # {
 
       b = pattern.match(JS_BRACE, j)
       !b.nil? && b[1].delete("0").empty?
-    end
-
-    # The end (exclusive) of the escape at i (a backslash) when it is an atom that must consume input;
-    # nil for the escapes that may match empty (\b \B, a backreference, \k, \c without a letter).
-    # An unsure escape is nil: calling it nullable only fails open, splitting an atom would not.
-    def self.escape_atom_end(pattern, i)
-      c = pattern[i + 1]
-      return nil if c.nil? || c.match?(/[bBk1-9]/)
-      return (pattern.match?(/\G[A-Za-z]/, i + 2) ? i + 3 : nil) if c == "c"
-      return i + 4 if c == "x" && pattern.match?(/\G\h{2}/, i + 2)
-      return i + 6 if c == "u" && pattern.match?(/\G\h{4}/, i + 2)
-      return pattern.match(/\G[0-7]{0,2}/, i + 2).end(0) if c == "0"
-
-      e = i + 2
-      e += 1 while e < pattern.length && pattern[e].ord.between?(0x80, 0xBF)
-      e
     end
 
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
@@ -340,6 +323,9 @@ module Camada
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
     ANY_CHAR = '[\x00-\x7f]|[\xc0-\xff][\x80-\xbf]*|[\s\S]' # one char of a binary UTF-8 string, whole
     JS_ATOM = /\G(?:\\(?:c[A-Za-z0-9_]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|(?!c)(?:#{ANY_CHAR}))|#{ANY_CHAR})/n # one class atom
+    # One escape that must consume input (nil where it may match empty: \b \B, \c without a letter, a trailing \).
+    # An unsure escape is no match: calling it nullable only fails open, splitting an atom would not.
+    ESC_ATOM = /\G\\(?:c[A-Za-z]|x\h{2}|u\h{4}|0[0-7]{0,2}|(?![bBc])(?:#{ANY_CHAR}))/n
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
