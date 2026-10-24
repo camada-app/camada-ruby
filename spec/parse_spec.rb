@@ -268,7 +268,8 @@ RSpec.describe Camada::Snapshot do
   it "fails open on an inline flag group, which JS rejects or V8 mis-evaluates (camada-all-lsl8)" do
     ['(?:(a{0,2}))((\\b\\3)*?)?(?i:\\1|[^a]*)+?', "(?i:googlebot|bingbot)", "(?-i:a)", "(?s:.)", "(?m:a$)",
      "(?i-m:a)", "x(?i:a)", "a(?i)b", "(?i)admin", "(?x:a b)", "(?^i:a)", "(?-i)a", "(?s)a.b", "(?R)",
-     "x(?im-s)y"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+     "x(?im-s)y", "(?>a+)b", "(?#c)a", "(a)?(?(1)b)", "(?'n'a)", "(?~a)", "(?|a|b)", "(?P<n>a)(?P=n)",
+     "(a)(?1)", "(*FAIL)", "(?<n>a)(?&n)", "(?0)", "a(?", "a(*", "(?", "(*"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
     expect(Camada::Snapshot.compile_regex("(?i:a)", Regexp::IGNORECASE)).to be_nil
   end
 
@@ -279,6 +280,16 @@ RSpec.describe Camada::Snapshot do
     expect(rx.call("[(?i)]")).to match("i")
     expect(rx.call("\\(?i\\)")).to match("(i)")
     ["(?:a)", "(?<n>a)", "(?=a)", "(?<!a)b"].each { |pat| expect(rx.call(pat)).not_to be_nil, pat }
+    expect(rx.call("(?:a)")).to match("a")
+    expect(rx.call("(?=a)a")).to match("a")
+    expect(rx.call("(?!b)a")).to match("a")
+    expect(rx.call("(?<=a)b")).to match("ab")
+    expect(rx.call("(?<!b)a")).to match("a")
+    expect(rx.call("(?<n>a)\\k<n>")).to match("aa")
+    expect(rx.call("[(?>]")).to match(">")
+    expect(rx.call("\\(?>")).to match("(>")
+    expect(rx.call("[(*]")).to match("*")
+    expect(rx.call("\\(*")).to match("((")
   end
 
   it "fails open on a backreference-bearing alternation that cannot be unmatched safely (camada-all-wlww)" do
