@@ -175,7 +175,8 @@ module Camada
       names
     end
 
-    JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
+    JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
+    ONIGMO_REPEAT_MAX = 100_000 # Onigmo rejects a repeat number above this ("too big number for repeat range")
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
     JS_ATOM = /\G(?:\\(?:c[A-Za-z]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|[\s\S])|[\s\S])/ # one class atom
@@ -192,6 +193,8 @@ module Camada
     # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
     # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
     # and so does a `-` right after the atom that follows it.
+    # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
+    # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
@@ -277,7 +280,7 @@ module Camada
           next
         elsif ch == "{"
           m = pattern.match(JS_BRACE, i)
-          out << (m ? m[0] : "\\{")
+          out << (m ? brace_quantifier(m) : "\\{")
           i += m ? m[0].length : 1
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
@@ -286,6 +289,17 @@ module Camada
         i += 1
       end
       out
+    end
+
+    def self.brace_quantifier(match)
+      lo = match[1].to_i
+      hi = match[3].to_s
+      return match[0] if lo <= ONIGMO_REPEAT_MAX && (hi.empty? || hi.to_i <= ONIGMO_REPEAT_MAX)
+
+      lo = [lo, ONIGMO_REPEAT_MAX].min
+      return "{#{lo}}" if match[2].nil?
+
+      hi.empty? || hi.to_i > ONIGMO_REPEAT_MAX ? "{#{lo},}" : "{#{lo},#{hi}}"
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
