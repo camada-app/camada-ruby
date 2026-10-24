@@ -177,8 +177,8 @@ module Camada
       while i < pattern.length
         ch = pattern[i]
         if ch == "\\"
-          if !in_class && (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*))/, i + 1))
-            refs << [i, m[1] || m[2].to_i, cur]
+          if !in_class && (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
+            refs << [i, m[3] ? :bad : m[1] || m[2].to_i, cur]
           end
           i += 1
         elsif in_class
@@ -189,7 +189,7 @@ module Camada
           cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i) }
           if pattern[i + 1] != "?"
             groups << cur
-          elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
+          elsif (m = pattern.match(/\G\(\?<([^=!<>][^<>]*)>/, i))
             groups << cur.merge!(name: m[1])
           end
         elsif ch == ")" && cur[:parent]
@@ -203,12 +203,14 @@ module Camada
       end
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
-      named = !index.empty?
+      named = names.any?
       lookbehind = lambda do |c|
         c = c[:parent] while c && !c[:lb]
         !c.nil?
       end
       diverges = refs.any? do |pos, ref, home|
+        next named if ref == :bad # a `\k` not followed by `<name>`: a SyntaxError beside named groups
+
         k = if ref.is_a?(String)
               index[ref]
             else
