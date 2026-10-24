@@ -184,6 +184,33 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
+  it "reads JS ., [] and \\s/\\S as JS does" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    {
+      "^.$" => [["\r", false], ["\u2028", false], ["\u2029", false], ["\n", false], ["a", true]],
+      "^\\.$" => [[".", true], ["a", false]], "^[.]$" => [[".", true], ["a", false]],
+      "[]a]" => [["a", false], ["]", false], ["a]", false]],
+      "^[^]x]$" => [["qx]", true], ["x", false]], "a[]*b" => [["ab", true]],
+      "^\\s$" => [[" ", true], ["\u00a0", true], ["\ufeff", true], ["a", false]],
+      "^\\S$" => [[" ", false], ["\u3000", false], ["a", true]],
+      "^[a\\s]$" => [["\u00a0", true], ["a", true], ["b", false]],
+      "^[^a\\s]$" => [["\u00a0", false], ["a", false], ["b", true]],
+      "^[a-\\sz]$" => [["-", true], ["m", false], ["z", true], [" ", true]],
+      "^[\\sa-]$" => [["-", true], ["a", true]], "^[a\\s-z]$" => [["-", true], ["m", false]],
+      "^[\\s^]$" => [["^", true], [" ", true], ["a", false]], "^[^\\s^]$" => [["^", false], ["a", true]],
+      "^[\\S\\d]$" => [[" ", false], ["a", true]], "^[^\\S]$" => [[" ", true], ["a", false]]
+    }.each do |pat, cases|
+      cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
+    end
+    expect do
+      old = $VERBOSE
+      $VERBOSE = true
+      Camada::Snapshot.compile_regex("[]a]")
+    ensure
+      $VERBOSE = old
+    end.not_to output.to_stderr
+  end
+
   it "never raises on a value the pattern cannot read" do
     m = rules_snapshot([{ "id" => "rx", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => "^\\w+$" }] }])
     expect(m.match(input(ua: "\xff".b)).block).to be(false) # a binary string no UTF-8 regex can read
