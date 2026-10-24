@@ -152,6 +152,29 @@ module Camada
       nil
     end
 
+    # The capture groups of a JS pattern in number order: the name, or nil for an unnamed group.
+    def self.capture_group_names(pattern)
+      names = []
+      in_class = false
+      i = 0
+      while i < pattern.length
+        ch = pattern[i]
+        if ch == "\\"
+          i += 1
+        elsif in_class
+          in_class = false if ch == "]"
+        elsif ch == "["
+          in_class = true
+        elsif ch == "(" && pattern[i + 1] != "?"
+          names << nil
+        elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
+          names << m[1]
+        end
+        i += 1
+      end
+      names
+    end
+
     JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
@@ -178,6 +201,7 @@ module Camada
       in_class = false
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
       named = pattern.match?(/\(\?<(?![=!])/)
+      group_names = named ? capture_group_names(pattern) : []
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
@@ -192,6 +216,14 @@ module Camada
             out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
             i += 3
             next
+          end
+          if named && !in_class && (m = pattern.match(/\G[1-9][0-9]*/, i + 1)) && (m[0].to_i <= group_names.length)
+            nm = group_names[m[0].to_i - 1] # Onigmo rejects a numbered backreference beside named groups
+            if nm
+              out << "\\k<#{nm}>"
+              i += 1 + m[0].length
+              next
+            end
           end
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
                  (l == "k" && named) || (l == "c" && in_class)
