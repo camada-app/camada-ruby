@@ -252,6 +252,8 @@ module Camada
           cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
           cur[:holds] ||= (cur[:zero] || cur[:rep]) && cur[:nullable] # it or a frame inside it: an optional nullable repeat
           cur[:parent][:holds] ||= cur[:holds]
+          exact = b && (b[2].nil? || b[1].sub(/\A0+(?=.)/, "") == b[3].sub(/\A0+(?=.)/, "")) # {n} or {n,n}: no optional iteration
+          cur[:opt] = cur[:rep] && !exact
           closed = cur
           cur = cur[:parent]
           cur[:solid] = true unless closed[:nullable] || closed[:zero] # the branch now holds an atom that must consume
@@ -279,7 +281,7 @@ module Camada
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
         f[:in_la] = f[:la] || p[:in_la] # inside a positive lookahead
-        f[:rn] = f[:rep] && f[:nullable] ? f : p[:rn] # innermost repeating frame (or ancestor) whose body can match empty
+        f[:rn] = f[:opt] && f[:nullable] ? f : p[:rn] # innermost frame (or ancestor) with an optional iteration whose body can match empty
       end
       dups = names.compact.tally.select { |_, c| c > 1 }
       plan = {}
