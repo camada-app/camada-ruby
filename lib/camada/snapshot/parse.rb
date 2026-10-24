@@ -146,8 +146,10 @@ module Camada
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
     # the control character, and the anchors: JS `^`/`$` bind the whole input while Ruby's are
-    # line anchors, so outside a class they become `\A`/`\z`. `(?<name>` is native to Onigmo.
-    # Anything else Ruby rejects still fails open.
+    # line anchors, so outside a class they become `\A`/`\z`; a `{` that is no JS quantifier
+    # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound). `(?<name>` is native to
+    # Onigmo. Anything else Ruby rejects still fails open.
+    JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
     def self.js_to_onigmo(pattern)
       out = +""
       i = 0
@@ -159,6 +161,11 @@ module Camada
           if pattern[i + 1] == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
             out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
             i += 3
+            next
+          end
+          if "pPk".include?(pattern[i + 1]) && pattern[i + 2] == "{" && (close = pattern.index("}", i + 3))
+            out << pattern[i..close] # \p{L}: those braces belong to the escape
+            i = close + 1
             next
           end
           out << pattern[i, 2]
@@ -180,6 +187,10 @@ module Camada
           next
         elsif ch == "$"
           out << "\\z"
+          i += 1
+          next
+        elsif ch == "{" && !pattern.match?(JS_BRACE, i)
+          out << "\\{"
           i += 1
           next
         end
