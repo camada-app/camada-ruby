@@ -197,6 +197,8 @@ RSpec.describe Camada::Snapshot do
       "^[^a\\s]$" => [["\u00a0", false], ["a", false], ["b", true]],
       "^[a-\\sz]$" => [["-", true], ["m", false], ["z", true], [" ", true]],
       "^[\\s-a-z]$" => [["b", false], ["-", true], ["z", true], ["a", true]], "^[\\s-\\x41-z]$" => [["b", false], ["-", true]],
+      "^[\\s-\\cA-z]$" => [["b", false], ["-", true]], "^[\\s-\\101-z]$" => [["b", false], ["-", true]],
+      "^[\\s\\S]$" => [["\n", true]], "^[^\\s\\S]$" => [["a", false]],
       "^[\\s-\\d-z]$" => [["b", false]], "^[\\s-ab-z]$" => [["c", true]], "^[a-\\s-z]$" => [["b", false], ["-", true]],
       "^[\\sa-]$" => [["-", true], ["a", true]], "^[a\\s-z]$" => [["-", true], ["m", false]],
       "^[\\s^]$" => [["^", true], [" ", true], ["a", false]], "^[^\\s^]$" => [["^", false], ["a", true]],
