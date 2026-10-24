@@ -252,8 +252,7 @@ module Camada
           cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
           cur[:holds] ||= (cur[:zero] || cur[:rep]) && cur[:nullable] # it or a frame inside it: an optional nullable repeat
           cur[:parent][:holds] ||= cur[:holds]
-          exact = b && (b[2].nil? || b[1].sub(/\A0+(?=.)/, "") == b[3].sub(/\A0+(?=.)/, "")) # {n} or {n,n}: no optional iteration
-          cur[:opt] = cur[:rep] && !exact
+          cur[:opt] = cur[:rep] && (b.nil? || (b[2] && (b[3].empty? || canon_digits(b[1]) != canon_digits(b[3])))) # not {n} / {n,n}
           closed = cur
           cur = cur[:parent]
           cur[:solid] = true unless closed[:nullable] || closed[:zero] # the branch now holds an atom that must consume
@@ -509,12 +508,15 @@ module Camada
       digits.length > 1 || digits > "1"
     end
 
+    # canonical: no leading zeros, "0" stays
+    def self.canon_digits(digits) = digits&.sub(/\A0+(?=.)/, "")
+
     def self.binary(str)
       str.encoding == Encoding::BINARY ? str : str.b
     end
 
     def self.brace_quantifier(match)
-      lo, comma, hi = match.captures.map { |d| d&.sub(/\A0+(?=.)/, "") } # canonical: no leading zeros
+      lo, comma, hi = match.captures.map { |d| canon_digits(d) }
       # m > n is a JS SyntaxError: leave it as written for Onigmo to reject
       return match[0] if hi.to_s != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
 
