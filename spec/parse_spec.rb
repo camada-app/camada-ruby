@@ -201,21 +201,74 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
-  it "reads \\k as a letter unless a real named group exists, and fails open on a backreference to a group that may not have captured" do
+  it "reads \\k as a letter unless a real named group exists, emulates JS for a backreference to an optional group, and fails open where it cannot" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call('[(?<]\k<n>').match?("(k<n>")).to be(true)
     expect(rx.call('\(?<x>\k<n>').match?("(<x>k<n>")).to be(true)
-    ['^(?:(?<n>a)|b)+\k<n>$', '(?<q>["\'])?x\k<q>', '\1(a)', '(a\1)', '(?:\1(a))+', '(?:(a)|b)\1', '(a)|b\1', '(a)?x\1',
-     '(a)*x\1', '(a){0,2}x\1', '(a){00}x\1', '(?!(a))\1b', '(?<!(a))\1b', '(?:(a)\1|b)',
-     '(?<=(a)\1)b', '(?<=([ab]){2})\1', '(?<=(a))\1', '(?<=\1(a))b', '(?<m>)|\k<n>', 'a|\k<n>(?<n>b)'].each do |pat|
+    ['^(?:(?<n>a)|b)+\k<n>$', '(?<=(a)\1)b', '(?<=([ab]){2})\1', '(?<=(a))\1', '(?<=\1(a))b',
+     '(?<m>)|\k<n>', '(?:(a)|b)+\1', '(?:(a)|b){2}\1', '(?:(?<n>a)?)*\k<n>', 'a\k<n>(?<m>b)',
+     '(a)*\1', '(a)*x\1', '(a){0,2}x\1', # an empty last iteration (node rejects it, Onigmo takes it)
+     '(b*)*x\1', '(b|)*x\1', '(a?){0,2}x\1', '(?:(?=(a)))?a\1', '(?=(a))?a\1', '(?=(a)){0,1}a\1',
+     '(?<a>x)(?=(?<b>y))?y\k<b>', # a capture in a lookahead a min-0 quantifier covers
+     '(?=(a??)?)\1a', '(?=(?:a??)?(b)?)a\1', '(?=(a*?){0,1})[ab]*\1', '(?=x(?<n>a??(x)*|){0,1})x\k<n>', # a conditional reference into a lookahead
+     '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1'].each do |pat|
       expect(rx.call(pat)).to(be_nil, pat)
     end
-    { '(a|b)\1' => %w[aa bb], '(a)+\1' => %w[aaa], '(?:(a)\1)+' => %w[aaaa], '(?<n>a)\k<n>' => %w[aa], '(?<n>a)\1' => %w[aa],
-      '(a){1,2}\1' => %w[aaa], '[\1](a)' => ["\x01a"] }.each do |pat, ss|
-      ss.each { |s| expect(rx.call(pat)&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
+    # node's answers (new RegExp("^(?:" + pat + ")$").test(s)): [matching, not matching]
+    { '(a)?x\1' => [%w[x axa], %w[ax]], '(?:(a)|b)\1' => [%w[aa b], %w[ba a]],
+      '(?<q>["\'])?x\k<q>' => [["x", '"x"', "'x'"], ['"x', %('x")]], '\1(a)' => [%w[a], %w[aa]], '(a\1)' => [%w[a], %w[aa]],
+      '(?:\1(a))+' => [%w[a aa], []], '(a)|b\1' => [%w[b a], %w[ab]], '(a){00}x\1' => [%w[x], %w[xa]], '(?!(a))\1b' => [%w[b], %w[ab]],
+      '(?:(a)\1|b)' => [%w[aa b], %w[a]], '(?<m>)|\k<n>(?<n>b)' => [["", "b"], []], '\k<n>(?<n>b)' => [%w[b], []],
+      'a|\k<n>(?<n>b)' => [%w[a b], []], '(a|b)\1' => [%w[aa bb], %w[ab]], '(a)+\1' => [%w[aaa], []],
+      '(?:(a)\1)+' => [%w[aaaa], []], '(?<n>a)\k<n>' => [%w[aa], []], '(?<n>a)\1' => [%w[aa], []],
+      '(a){1,2}\1' => [%w[aaa], []] }.each do |pat, (yes, no)|
+      re = rx.call("^(?:#{pat})$")
+      yes.each { |s| expect(re&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
+      no.each { |s| expect(re&.match?(s)).to(be(false), "#{pat} on #{s.inspect}") }
     end
-    expect(rx.call('(a|b)\1').match?("ab")).to be(false)
-    expect(Camada::Snapshot.scan_groups('\2(a)').last).to be(false) # not a backreference with one group
+    expect(rx.call('[\1](a)').match?("\x01a")).to be(true)
+    expect(Camada::Snapshot.scan_groups('\2(a)')[1]).to be(false) # not a backreference with one group
+  end
+
+  it "fails open on a non-UTF-8 pattern (the binary walk misreads it)" do
+    [["ソ(a)?x\\1".encode("Shift_JIS"), "a(b)?\\1".encode("UTF-16LE")]].flatten.each do |pat|
+      expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat.encoding.to_s
+    end
+    expect(Camada::Snapshot.compile_regex("a(b)?x\\1".encode("US-ASCII"))).not_to be_nil
+  end
+
+  it "classifies deeply nested backreferences in linear time" do
+    ["(a)?", "(a)"].each do |inner|
+      pat = "#{"(?:" * 4000}#{inner}#{")" * 4000}#{"\\1" * 4000}"
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Camada::Snapshot.scan_groups(pat)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 0.5, inner
+    end
+  end
+
+  it "fails open on a backreference-bearing alternation that cannot be unmatched safely (camada-all-wlww)" do
+    expect(Camada::Snapshot.compile_regex('a|\k<n>((?<m>a)')).to be_nil
+  end
+
+  it "translates a large non-ASCII pattern in linear time and keeps its meaning (camada-all-ffbk)" do
+    big = "é(a)\\1" * 20_000
+    best = Array.new(3) do # best of three: a busy machine adds noise, never a quadratic walk's seconds
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(Camada::Snapshot.compile_regex(big)).not_to be_nil
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
+    end.min
+    expect(best).to be < 0.2
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    expect(rx.call("[é-ü]").match?("ö")).to be(true)
+    expect(rx.call("[é-ü]").match?("a")).to be(false)
+    expect(rx.call('é\s').match?("é\u00a0")).to be(true)
+    expect(rx.call('[a\s-é]').match?("-")).to be(true)
+    expect(rx.call('[a\s-é]').match?("b")).to be(false)
+    expect(rx.call('[a\s-éb]').match?("b")).to be(true)
+    expect(rx.call('(?<ñ>é)\k<ñ>').match?("éé")).to be(true)
+    expect(rx.call('(?<n>é)\k<n>').match?("éa")).to be(false)
+    expect(rx.call('(é)?x\1').match?("x")).to be(true)
+    expect(rx.call("é(a)\\1").source.encoding).to eq(Encoding::UTF_8)
   end
 
   it "scans a run of \\k< openers in linear time (literal text without a named group)" do
