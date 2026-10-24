@@ -139,8 +139,12 @@ module Camada
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
+    # A backreference to a group that may not have captured diverges from JS: fail open (scan_groups).
     def self.compile_regex(pattern, options = 0)
-      source = js_to_onigmo(pattern)
+      group_names, diverges = scan_groups(pattern)
+      return nil if diverges
+
+      source = js_to_onigmo(pattern, group_names)
       verbose = $VERBOSE
       begin
         $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
@@ -152,27 +156,77 @@ module Camada
       nil
     end
 
-    # The capture groups of a JS pattern in number order: the name, or nil for an unnamed group.
-    def self.capture_group_names(pattern)
-      names = []
+    # One escape/class-aware walk: [the capture groups of a JS pattern in number order (the name, or
+    # nil when unnamed), whether a backreference may target a group that has not captured on that
+    # pass]. JS resets captures each iteration and reads such a backreference as empty; Onigmo keeps
+    # the last capture (and fails it), so those patterns fail open. A target diverges when it is not
+    # closed before the reference, or it (or an enclosing group) is followed by a min-0 quantifier or
+    # sits in a negative lookaround, or it lies in an alternation branch (a `|` in an enclosing group
+    # or at top level). A backreference inside a lookbehind, or to a group with a lookbehind ancestor, diverges too: JS
+    # matches a lookbehind right to left ("closed before the reference" is backwards there; a quantified group keeps
+    # its leftmost repetition). Beside named groups, a `\k<name>` naming no group is a JS SyntaxError: fail open
+    # (Onigmo aborts the process on it). Deliberately conservative: `(?:(a)\1|b)` diverges too.
+    def self.scan_groups(pattern)
+      return [[], false] unless pattern.match?(/\\[1-9k]/) # no reference: nothing reads the names or can diverge
+
+      cur = { parent: nil }
+      groups = [] # capture groups in number order
+      refs = [] # [position, number or name]
       in_class = false
       i = 0
       while i < pattern.length
         ch = pattern[i]
         if ch == "\\"
+          if !in_class && (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
+            refs << [i, m[3] ? :bad : m[1] || m[2].to_i, cur]
+          end
           i += 1
         elsif in_class
           in_class = false if ch == "]"
         elsif ch == "["
           in_class = true
-        elsif ch == "(" && pattern[i + 1] != "?"
-          names << nil
-        elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
-          names << m[1]
+        elsif ch == "("
+          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i) }
+          if pattern[i + 1] != "?"
+            groups << cur
+          elsif (m = pattern.match(/\G\(\?<([^=!<>][^<>]*)>/, i))
+            groups << cur.merge!(name: m[1])
+          end
+        elsif ch == ")" && cur[:parent]
+          cur[:end] = i
+          cur[:zero] = pattern.match?(/\G[?*]/, i + 1) || ((b = pattern.match(JS_BRACE, i + 1)) && b[1].delete("0").empty?)
+          cur = cur[:parent]
+        elsif ch == "|"
+          cur[:alt] = true
         end
         i += 1
       end
-      names
+      names = groups.map { |g| g[:name] }
+      index = names.each_with_index.reverse_each.to_h # name => first group number - 1
+      named = names.any?
+      lookbehind = lambda do |c|
+        c = c[:parent] while c && !c[:lb]
+        !c.nil?
+      end
+      diverges = refs.any? do |pos, ref, home|
+        next named if ref == :bad # a `\k` not followed by `<name>`: a SyntaxError beside named groups
+
+        k = if ref.is_a?(String)
+              index[ref]
+            else
+              ref <= groups.length ? ref - 1 : nil
+            end
+        next named && ref.is_a?(String) unless k # a name with no group beside named groups: a JS SyntaxError
+
+        g = groups[k]
+        next true if lookbehind.call(home) || lookbehind.call(g)
+        next true unless g[:end] && g[:end] < pos
+
+        chain = [g]
+        chain << chain.last[:parent] while chain.last[:parent]
+        chain.any? { |c| c[:zero] || c[:neg] } || chain.drop(1).any? { |c| c[:alt] }
+      end
+      [names, diverges]
     end
 
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
@@ -199,14 +253,14 @@ module Camada
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
-    def self.js_to_onigmo(pattern)
+    def self.js_to_onigmo(pattern, group_names = nil)
       out = +""
       i = 0
       n = pattern.length
       in_class = false
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
-      named = pattern.match?(/\(\?<(?![=!])/)
-      group_names = named ? capture_group_names(pattern) : []
+      group_names ||= scan_groups(pattern).first
+      named = group_names.any?
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
