@@ -238,7 +238,7 @@ module Camada
           elsif (m = pattern.match(/\G\(\?<([^=!<>][^<>]*)>/, i))
             groups << cur.merge!(name: m[1])
           end
-          if (m = pattern.match(/\G\(\?(?:<[=!]|<[^<>]*>|[:=!])/, i))
+          if (m = pattern.match(/\G\(\?(?:<[=!]|<[^<>]*>|[A-Za-z-]*:|[=!])/, i))
             i = m.end(0) - 1 # the group's prefix is no atom
           end
         elsif ch == ")" && cur[:parent]
