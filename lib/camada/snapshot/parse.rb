@@ -170,9 +170,10 @@ module Camada
     # it lies in an alternation branch: a `|` in an enclosing group or at top level) becomes the conditional
     # `(?(N)\N)` (kind :cond; unset reads as empty), unless the group or an ancestor repeats (an empty last iteration
     # makes Onigmo overwrite the capture, JS rejects that iteration and keeps it and the per-iteration reset
-    # diverges) or a min-0 quantifier covers a positive lookahead around it (the same empty iteration, its capture
-    # kept by Onigmo): fail open. So does a backward reference to a name two groups share (JS allows that in
-    # separate branches; Onigmo reads another group). A backreference inside a lookbehind, or to a group with a lookbehind
+    # diverges) or the group sits inside a positive lookahead (a lookahead keeps its first successful path, and JS tries the
+    # paths in another order and rejects an empty optional iteration): fail open. So does a backward reference to a
+    # name two groups share (JS allows that in separate
+    # branches; Onigmo reads another group). A backreference inside a lookbehind, or to a group with a lookbehind
     # ancestor, fails open too: JS matches a lookbehind right to left ("closed before the reference" is backwards
     # there; a quantified group keeps its leftmost repetition). Beside named groups, a `\k<name>` naming no group
     # is a JS SyntaxError: fail open (Onigmo aborts the process on it).
@@ -227,8 +228,7 @@ module Camada
         f[:in_lb] = f[:lb] || p[:in_lb]
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
-        f[:zero_at] = f[:zero] || p[:zero_at] # it or an ancestor has a min-0 quantifier
-        f[:la_opt] = p[:la_opt] || (f[:la] && f[:zero_at]) # inside a positive lookahead that a min-0 quantifier covers
+        f[:in_la] = f[:la] || p[:in_la] # inside a positive lookahead
       end
       dups = names.compact.tally.select { |_, c| c > 1 }
       plan = {}
@@ -251,7 +251,7 @@ module Camada
         end
         next true if g[:name] && dups[g[:name]] # JS allows a name in two branches; Onigmo reads another group
         next false unless g[:unset]
-        next true if g[:rep_above] || g[:rep] || g[:la_opt]
+        next true if g[:rep_above] || g[:rep] || g[:in_la]
 
         plan[pos] = [stop, :cond]
         false
