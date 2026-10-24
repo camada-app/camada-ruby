@@ -265,6 +265,19 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
+  it "fails open on a JS modifier group, which V8 mis-evaluates (camada-all-lsl8)" do
+    ['(?:(a{0,2}))((\\b\\3)*?)?(?i:\\1|[^a]*)+?', "(?i:googlebot|bingbot)", "(?-i:a)", "(?s:.)", "(?m:a$)",
+     "(?i-m:a)", "x(?i:a)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+    expect(Camada::Snapshot.compile_regex("(?i:a)", Regexp::IGNORECASE)).to be_nil
+  end
+
+  it "does not mistake other constructs for a modifier group" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    expect(rx.call("[(?i:a)]")).to match("i")
+    expect(rx.call("\\(?i:a\\)")).to match("(i:a)")
+    ["(?:a)", "(?<n>a)", "(?=a)", "(?<!a)b"].each { |pat| expect(rx.call(pat)).not_to be_nil, pat }
+  end
+
   it "fails open on a backreference-bearing alternation that cannot be unmatched safely (camada-all-wlww)" do
     expect(Camada::Snapshot.compile_regex('a|\k<n>((?<m>a)')).to be_nil
   end
