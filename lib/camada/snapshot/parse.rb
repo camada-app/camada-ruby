@@ -139,7 +139,10 @@ module Camada
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
+    # A backreference to a group that may not have captured diverges from JS: fail open (scan_groups).
     def self.compile_regex(pattern, options = 0)
+      return nil if scan_groups(pattern).last
+
       source = js_to_onigmo(pattern)
       verbose = $VERBOSE
       begin
@@ -152,27 +155,64 @@ module Camada
       nil
     end
 
-    # The capture groups of a JS pattern in number order: the name, or nil for an unnamed group.
-    def self.capture_group_names(pattern)
-      names = []
+    # One escape/class-aware walk: [the capture groups of a JS pattern in number order (the name, or
+    # nil when unnamed), whether a backreference may target a group that has not captured on that
+    # pass]. JS resets captures each iteration and reads such a backreference as empty; Onigmo keeps
+    # the last capture (and fails it), so those patterns fail open. A target diverges when it is not
+    # closed before the reference, or it (or an enclosing group) is followed by a min-0 quantifier or
+    # sits in a negative lookaround, or it lies in an alternation branch (a `|` in an enclosing group
+    # or at top level). Deliberately conservative: `(?:(a)\1|b)` diverges too.
+    def self.scan_groups(pattern)
+      cur = { parent: nil }
+      groups = [] # capture groups in number order
+      refs = [] # [position, number or name]
       in_class = false
       i = 0
       while i < pattern.length
         ch = pattern[i]
         if ch == "\\"
+          if !in_class && (m = pattern.match(/\G(?:k<([^>]*)>|([1-9][0-9]*))/, i + 1))
+            refs << [i, m[1] || m[2].to_i]
+          end
           i += 1
         elsif in_class
           in_class = false if ch == "]"
         elsif ch == "["
           in_class = true
-        elsif ch == "(" && pattern[i + 1] != "?"
-          names << nil
-        elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
-          names << m[1]
+        elsif ch == "("
+          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i) }
+          if pattern[i + 1] != "?"
+            groups << cur
+          elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
+            groups << cur.merge!(name: m[1])
+          end
+        elsif ch == ")" && cur[:parent]
+          cur[:end] = i
+          cur[:zero] = pattern.match?(/\G(?:[?*]|\{0+(?:,[0-9]*)?\})/, i + 1)
+          cur = cur[:parent]
+        elsif ch == "|"
+          cur[:alt] = true
         end
         i += 1
       end
-      names
+      names = groups.map { |g| g[:name] }
+      named = names.any?
+      diverges = refs.any? do |pos, ref|
+        k = if ref.is_a?(String)
+              named ? names.index(ref) : nil
+            else
+              ref <= groups.length ? ref - 1 : nil
+            end
+        next false unless k
+
+        g = groups[k]
+        next true unless g[:end] && g[:end] < pos
+
+        chain = [g]
+        chain << chain.last[:parent] while chain.last[:parent]
+        chain.any? { |c| c[:zero] || c[:neg] } || chain.drop(1).any? { |c| c[:alt] }
+      end
+      [names, diverges]
     end
 
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
@@ -205,8 +245,8 @@ module Camada
       n = pattern.length
       in_class = false
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
-      named = pattern.match?(/\(\?<(?![=!])/)
-      group_names = named ? capture_group_names(pattern) : []
+      group_names = scan_groups(pattern).first
+      named = group_names.any?
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
