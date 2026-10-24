@@ -328,7 +328,7 @@ module Camada
     # An unsure escape is no match: calling it nullable only fails open, splitting an atom would not.
     ESC_ATOM = /\G\\(?:c[A-Za-z]|x\h{2}|u\h{4}|0[0-7]{0,2}|(?![bBc])(?:#{ANY_CHAR}))/n
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
-    JS_FLAG_GROUP = /\G\(\?[A-Za-z^-]+[:)]/ # an inline flag group `(?i:`, `(?-i:`, `(?x:`, `(?^i:`, bare `(?i)`
+    NON_JS_GROUP = /\G\([?*](?![:=!<])/ # a `(?` or `(*` that opens none of the (? forms JS has: `(?:` `(?=` `(?!` `(?<`
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
@@ -416,8 +416,8 @@ module Camada
             ch = "\\-"
           end
           ch = "\\#{ch}" if ch == "[" || ch == "&" # JS: `[[:alpha:]]` is {[ : a l p h} then `]`
-        elsif ch == "(" && pattern.match?(JS_FLAG_GROUP, i)
-          raise RegexpError, "inline flag group" # compile_regex fails open
+        elsif ch == "(" && pattern.match?(NON_JS_GROUP, i)
+          raise RegexpError, "non-JS group" # compile_regex fails open
         elsif ch == "."
           out << JS_DOT
           i += 1
