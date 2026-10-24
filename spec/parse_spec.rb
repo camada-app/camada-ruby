@@ -208,6 +208,7 @@ RSpec.describe Camada::Snapshot do
     expect(rx.call("^a{99999999999}$")).not_to be_nil
     expect(rx.call("^a{99999999999,}$")).not_to be_nil
     expect(rx.call("^(?:ab){1,99999999999}$")).to match("abab")
+    expect(rx.call("^a{1,#{"9" * 5000}}$")).to match("a")
     expect(Camada::Snapshot.js_to_onigmo("^a{2,3}$")).to eq("\\Aa{2,3}\\z")
   end
 
