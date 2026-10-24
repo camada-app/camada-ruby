@@ -226,6 +226,21 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.compile_regex("#{"\\k<" * 3}>").match?("k<k<k<>")).to be(true)
   end
 
+  it "reads \\k as literal text when no group is named, even beside unnamed groups" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    { '()\k<m>' => "k<m>", '(a)x\k<n>' => "axk<n>", '(\d+)-\k<id>' => "12-k<id>" }.each { |pat, s| expect(rx.call(pat)&.match?(s)).to be(true), pat }
+  end
+
+  it "fails open on a malformed \\k beside named groups (a JS SyntaxError; Onigmo aborts the process)" do
+    ['(?<n>a)|\k<', '(?<n>a)|\k<n', '(?<n>a)|\k<a<b>', '|\k<(?<n>a)', '(?<n>a)|\k'].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+  end
+
+  it "scans a run of group openers in linear time" do
+    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    Camada::Snapshot.compile_regex("#{"(?<" * 20_000}>\\1")
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 1
+  end
+
   it "clamps a JS quantifier bound above Onigmo's 100000 (camada-all-yh2t)" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call("^a{1,99999999999}$")).to match("a")
