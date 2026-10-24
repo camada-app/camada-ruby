@@ -188,7 +188,10 @@ module Camada
     # `(?(N)\N)` (kind :cond; unset reads as empty), unless the group or an ancestor repeats (an empty last iteration
     # makes Onigmo overwrite the capture, JS rejects that iteration and keeps it and the per-iteration reset
     # diverges) or the group sits inside a positive lookahead (a lookahead keeps its first successful path, and JS tries the
-    # paths in another order and rejects an empty optional iteration): fail open. So does a backward reference to a
+    # paths in another order and rejects an empty optional iteration): fail open. So does a plain reference (the group
+    # closed before it, always captured) to a group that sits in, or is, a repeated body that can match empty
+    # (`(b*)+x\1`): the walk tracks per frame whether its body must consume input (solid) or can match empty (nullable).
+    # A reference inside that repeat reads its own iteration's capture and stays compiled. So does a backward reference to a
     # name two groups share (JS allows that in separate
     # branches; Onigmo reads another group). A backreference inside a lookbehind, or to a group with a lookbehind
     # ancestor, fails open too: JS matches a lookbehind right to left ("closed before the reference" is backwards
@@ -210,12 +213,21 @@ module Camada
       while i < pattern.length
         ch = pattern[i]
         if ch == "\\"
-          if !in_class && (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
+          if in_class
+            nil
+          elsif (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
             refs << [i, m[3] ? :bad : m[1] || m[2].to_i, cur, m.end(0)]
+            i = m.end(0) - 2 # the reference is no atom: skip its name or digits (the loop's step and the one below)
+          elsif (m = ESC_ATOM.match(pattern, i))
+            cur[:solid] = true unless min_zero?(pattern, m.end(0))
+            i = m.end(0) - 2
           end
           i += 1
         elsif in_class
-          in_class = false if ch == "]"
+          if ch == "]"
+            in_class = false
+            cur[:solid] = true unless min_zero?(pattern, i + 1)
+          end
         elsif ch == "["
           in_class = true
         elsif ch == "("
@@ -226,14 +238,29 @@ module Camada
           elsif (m = pattern.match(/\G\(\?<([^=!<>][^<>]*)>/, i))
             groups << cur.merge!(name: m[1])
           end
+          if (m = pattern.match(/\G\(\?(?:<[=!]|<[^<>]*>|[A-Za-z-]*:|[=!])/, i))
+            i = m.end(0) - 1 # the group's prefix is no atom
+          end
         elsif ch == ")" && cur[:parent]
           cur[:end] = i
           b = pattern.match(JS_BRACE, i + 1)
-          cur[:zero] = pattern.match?(/\G[?*]/, i + 1) || (b && b[1].delete("0").empty?)
+          cur[:zero] = min_zero?(pattern, i + 1)
+          cur[:nullable] ||= !cur[:solid] || cur[:lb] || cur[:la] || cur[:neg] # a lookaround consumes nothing
           cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
+          closed = cur
           cur = cur[:parent]
+          cur[:solid] = true unless closed[:nullable] || closed[:zero] # the branch now holds an atom that must consume
         elsif ch == "|"
           cur[:alt] = true
+          cur[:nullable] ||= !cur[:solid]
+          cur[:solid] = false
+        elsif ch == "{" && (b = pattern.match(JS_BRACE, i))
+          i = b.end(0) - 1 # a quantifier, not an atom
+        elsif ch.ord >= 0xC0 || (ch.ord < 0x80 && !"^$?*+".include?(ch))
+          e = i + 1
+          e += 1 while e < pattern.length && pattern.getbyte(e).between?(0x80, 0xBF)
+          cur[:solid] = true unless min_zero?(pattern, e)
+          i = e - 1
         end
         i += 1
       end
@@ -246,6 +273,7 @@ module Camada
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
         f[:in_la] = f[:la] || p[:in_la] # inside a positive lookahead
+        f[:rn] = f[:rep] && f[:nullable] ? f : p[:rn] # innermost repeating frame (or ancestor) whose body can match empty
       end
       dups = names.compact.tally.select { |_, c| c > 1 }
       plan = {}
@@ -267,6 +295,9 @@ module Camada
           next false
         end
         next true if g[:name] && dups[g[:name]] # JS allows a name in two branches; Onigmo reads another group
+        # a repeat that can match empty: Onigmo's last empty iteration overwrites the capture, JS keeps it
+        next true if (rn = g[:rn]) && rn[:end] < pos
+
         next false unless g[:unset]
         next true if g[:rep_above] || g[:rep] || g[:in_la]
 
@@ -276,12 +307,25 @@ module Camada
       [names, diverges, plan]
     end
 
+    # Whether the text at j starts a min-0 quantifier (`?`, `*`, `{0}`, `{0,}`, `{0,m}`).
+    def self.min_zero?(pattern, j)
+      c = pattern.getbyte(j)
+      return true if c == 0x3F || c == 0x2A # ? *
+      return false unless c == 0x7B # {
+
+      b = pattern.match(JS_BRACE, j)
+      !b.nil? && b[1].delete("0").empty?
+    end
+
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
     ONIGMO_REPEAT_MAX = 100_000 # Onigmo rejects a repeat number above this ("too big number for repeat range")
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
     ANY_CHAR = '[\x00-\x7f]|[\xc0-\xff][\x80-\xbf]*|[\s\S]' # one char of a binary UTF-8 string, whole
     JS_ATOM = /\G(?:\\(?:c[A-Za-z0-9_]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|(?!c)(?:#{ANY_CHAR}))|#{ANY_CHAR})/n # one class atom
+    # One escape that must consume input (nil where it may match empty: \b \B, \c without a letter, a trailing \).
+    # An unsure escape is no match: calling it nullable only fails open, splitting an atom would not.
+    ESC_ATOM = /\G\\(?:c[A-Za-z]|x\h{2}|u\h{4}|0[0-7]{0,2}|(?![bBc])(?:#{ANY_CHAR}))/n
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
