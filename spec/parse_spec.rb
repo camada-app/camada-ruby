@@ -226,6 +226,15 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.scan_groups('\2(a)')[1]).to be(false) # not a backreference with one group
   end
 
+  it "classifies deeply nested backreferences in linear time" do
+    ["(a)?", "(a)"].each do |inner|
+      pat = "#{"(?:" * 4000}#{inner}#{")" * 4000}#{"\\1" * 4000}"
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      Camada::Snapshot.scan_groups(pat)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 0.5, inner
+    end
+  end
+
   it "fails open on a backreference-bearing alternation that cannot be unmatched safely (camada-all-wlww)" do
     expect(Camada::Snapshot.compile_regex('a|\k<n>((?<m>a)')).to be_nil
   end
