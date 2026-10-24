@@ -294,14 +294,17 @@ module Camada
     end
 
     def self.brace_quantifier(match)
-      lo, comma, hi = match.captures
+      lo, comma, hi = match.captures.map { |d| d&.sub(/\A0+(?=.)/, "") } # canonical: no leading zeros
+      # m > n is a JS SyntaxError: leave it as written for Onigmo to reject
+      return match[0] if hi.to_s != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
+
       lo = ONIGMO_REPEAT_MAX.to_s if over_repeat_max?(lo)
       hi = "" if over_repeat_max?(hi) # an upper bound past it never binds a real input
       "{#{lo}#{comma}#{hi}}"
     end
 
     def self.over_repeat_max?(digits)
-      digits = digits.to_s.sub(/\A0+/, "") # nil: `{m}` has no upper bound
+      digits = digits.to_s # nil: `{m}` has no upper bound
       digits.length > 6 || digits.to_i > ONIGMO_REPEAT_MAX # length first: to_i on a huge digit string is slow
     end
 
