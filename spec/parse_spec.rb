@@ -273,6 +273,23 @@ RSpec.describe Camada::Snapshot do
     expect(Camada::Snapshot.compile_regex("(?i:a)", Regexp::IGNORECASE)).to be_nil
   end
 
+  it "fails open on a group name JS rejects or a duplicate that could both participate (camada-all-7xyl)" do
+    ["(?<n-m>a)", "(?<n+1>a)", "(?<\u00b7a>a)", "(?<>a)", "(?<1a>a)", "(?<n>a)(?<n>b)", "(?<n>(?<n>a))",
+     "(?:(?<n>a)|b)(?<n>c)", "(?<n>a)|(?<n>b)\\k<n>", "(?:(?<n>a)|(?<n>b))(c)\\2", "(?<n>a)|(?<n>b)\\1",
+     "(?<n>a)|(?<n>b)(?<n>c)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+  end
+
+  it "compiles group names JS accepts, copied verbatim (camada-all-7xyl)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    expect(rx.call("(?<\u00e9>a)\\k<\u00e9>")).to match("aa")
+    expect(rx.call("(?<$x>a)\\k<$x>")).to match("aa")
+    expect(rx.call("(?<$x_\u200c>a)")).to match("a")
+    expect(rx.call("(?<\u2118>a)")).to match("a")
+    expect(rx.call("(?<n>a)|(?<n>b)").match("b")[:n]).to eq("b")
+    expect(rx.call("(?:(?<n>a)|(?<n>b))c")).to match("bc")
+    expect(rx.call("((?<n>a)|x)|(?<n>b)")).to match("b")
+  end
+
   it "does not mistake other constructs for an inline flag group" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call("[(?i:a)]")).to match("i")
