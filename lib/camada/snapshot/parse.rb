@@ -162,7 +162,10 @@ module Camada
     # the last capture (and fails it), so those patterns fail open. A target diverges when it is not
     # closed before the reference, or it (or an enclosing group) is followed by a min-0 quantifier or
     # sits in a negative lookaround, or it lies in an alternation branch (a `|` in an enclosing group
-    # or at top level). Deliberately conservative: `(?:(a)\1|b)` diverges too.
+    # or at top level). A backreference inside a lookbehind, or to a group with a lookbehind ancestor, diverges too: JS
+    # matches a lookbehind right to left ("closed before the reference" is backwards there; a quantified group keeps
+    # its leftmost repetition). Beside named groups, a `\k<name>` naming no group is a JS SyntaxError: fail open
+    # (Onigmo aborts the process on it). Deliberately conservative: `(?:(a)\1|b)` diverges too.
     def self.scan_groups(pattern)
       return [[], false] unless pattern.match?(/\\[1-9k]/) # no reference: nothing reads the names or can diverge
 
@@ -174,8 +177,8 @@ module Camada
       while i < pattern.length
         ch = pattern[i]
         if ch == "\\"
-          if !in_class && (m = pattern.match(/\G(?:k<([^>]*)>|([1-9][0-9]*))/, i + 1))
-            refs << [i, m[1] || m[2].to_i]
+          if !in_class && (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*))/, i + 1))
+            refs << [i, m[1] || m[2].to_i, cur]
           end
           i += 1
         elsif in_class
@@ -183,7 +186,7 @@ module Camada
         elsif ch == "["
           in_class = true
         elsif ch == "("
-          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i) }
+          cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i) }
           if pattern[i + 1] != "?"
             groups << cur
           elsif (m = pattern.match(/\G\(\?<([^=!>][^>]*)>/, i))
@@ -200,15 +203,21 @@ module Camada
       end
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
-      diverges = refs.any? do |pos, ref|
+      named = !index.empty?
+      lookbehind = lambda do |c|
+        c = c[:parent] while c && !c[:lb]
+        !c.nil?
+      end
+      diverges = refs.any? do |pos, ref, home|
         k = if ref.is_a?(String)
               index[ref]
             else
               ref <= groups.length ? ref - 1 : nil
             end
-        next false unless k
+        next named && ref.is_a?(String) unless k # a name with no group beside named groups: a JS SyntaxError
 
         g = groups[k]
+        next true if lookbehind.call(home) || lookbehind.call(g)
         next true unless g[:end] && g[:end] < pos
 
         chain = [g]
