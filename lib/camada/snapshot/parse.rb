@@ -141,10 +141,11 @@ module Camada
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
     def self.compile_regex(pattern, options = 0)
-      group_names, diverges, plan = scan_groups(pattern)
-      return nil if diverges
+      bin = pattern.b # the one binary copy both walks read (O(1) indexing; the syntax is ASCII)
+      scan = scan_groups(bin)
+      return nil if scan[1]
 
-      source = js_to_onigmo(pattern, group_names, plan)
+      source = js_to_onigmo(bin, scan).force_encoding(pattern.encoding)
       verbose = $VERBOSE
       begin
         $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
@@ -157,23 +158,26 @@ module Camada
     end
 
     # One escape/class-aware walk: [the capture groups of a JS pattern in number order (the name, or
-    # nil when unnamed), whether the pattern fails open, {reference position => [length, replacement]}].
+    # nil when unnamed), whether the pattern fails open, {reference position => [end position, :empty or :cond]}].
     # JS reads a backreference to a group that has not captured as empty and clears captures each
     # iteration; Onigmo fails it and keeps the last capture. A reference to a group not closed before
-    # it (forward or self) is always empty in JS: replaced by `(?:)`. One to a group that may not have
+    # it (forward or self) is always empty in JS: kind :empty, written `(?:)`. One to a group that may not have
     # captured (it or an enclosing group is followed by a min-0 quantifier or sits in a negative lookaround, or
     # it lies in an alternation branch: a `|` in an enclosing group or at top level) becomes the conditional
-    # `(?(N)\N)` (unset reads as empty), unless a strict ancestor of the group repeats: the per-iteration
+    # `(?(N)\N)` (kind :cond; unset reads as empty), unless a strict ancestor of the group repeats: the per-iteration
     # reset then diverges, so fail open. A backreference inside a lookbehind, or to a group with a lookbehind
     # ancestor, fails open too: JS matches a lookbehind right to left ("closed before the reference" is backwards
     # there; a quantified group keeps its leftmost repetition). Beside named groups, a `\k<name>` naming no group
     # is a JS SyntaxError: fail open (Onigmo aborts the process on it).
     # Walks a binary copy (O(1) indexing; the syntax is ASCII), so the names come back binary.
+    # After the walk one forward pass over the frames (a parent precedes its children) settles, per
+    # frame, what its ancestors imply, so each reference costs O(1) however deeply its group nests.
     def self.scan_groups(pattern)
-      pattern = pattern.b
+      pattern = binary(pattern)
       return [[], false, {}] unless pattern.match?(/\\[1-9k]/) # no reference: nothing reads the names or can diverge
 
       cur = { parent: nil }
+      frames = [cur] # every group, capturing or not, in `(` order
       groups = [] # capture groups in number order
       refs = [] # [position, number or name]
       in_class = false
@@ -191,6 +195,7 @@ module Camada
           in_class = true
         elsif ch == "("
           cur = { parent: cur, neg: pattern.match?(/\G\(\?<?!/, i), lb: pattern.match?(/\G\(\?<[=!]/, i) }
+          frames << cur
           if pattern[i + 1] != "?"
             groups << cur
           elsif (m = pattern.match(/\G\(\?<([^=!<>][^<>]*)>/, i))
@@ -200,7 +205,7 @@ module Camada
           cur[:end] = i
           b = pattern.match(JS_BRACE, i + 1)
           cur[:zero] = pattern.match?(/\G[?*]/, i + 1) || (b && b[1].delete("0").empty?)
-          cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || b[3].to_i > 1 : b[1].to_i > 1)) # repeats
+          cur[:rep] = pattern.match?(/\G[+*]/, i + 1) || (b && (b[2] ? b[3].empty? || over_one?(b[3]) : over_one?(b[1]))) # repeats
           cur = cur[:parent]
         elsif ch == "|"
           cur[:alt] = true
@@ -210,9 +215,11 @@ module Camada
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
       named = names.any?
-      lookbehind = lambda do |c|
-        c = c[:parent] while c && !c[:lb]
-        !c.nil?
+      frames.drop(1).each do |f|
+        p = f[:parent]
+        f[:in_lb] = f[:lb] || p[:in_lb]
+        f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
+        f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
       end
       plan = {}
       diverges = refs.any? do |pos, ref, home, stop|
@@ -226,20 +233,16 @@ module Camada
         next named && ref.is_a?(String) unless k # a name with no group beside named groups: a JS SyntaxError
 
         g = groups[k]
-        next true if lookbehind.call(home) || lookbehind.call(g)
+        next true if home[:in_lb] || g[:in_lb]
 
         unless g[:end] && g[:end] < pos
-          plan[pos] = [stop - pos, "(?:)"] # never captured yet: empty, and a quantifier after it keeps its atom
+          plan[pos] = [stop, :empty] # never captured yet: empty, and a quantifier after it keeps its atom
           next false
         end
+        next false unless g[:unset]
+        next true if g[:rep_above]
 
-        chain = [g]
-        chain << chain.last[:parent] while chain.last[:parent]
-        next false unless chain.any? { |c| c[:zero] || c[:neg] } || chain.drop(1).any? { |c| c[:alt] }
-        next true if chain.drop(1).any? { |c| c[:rep] }
-
-        nm = g[:name]
-        plan[pos] = [stop - pos, nm ? "(?(<#{nm}>)\\k<#{nm}>)" : "(?(#{ref})\\#{ref})"]
+        plan[pos] = [stop, :cond]
         false
       end
       [names, diverges, plan]
@@ -270,24 +273,30 @@ module Camada
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
-    # Walks a binary copy (O(1) indexing on a non-ASCII pattern) and returns the pattern's encoding.
-    def self.js_to_onigmo(pattern, group_names = nil, plan = nil)
+    # `scan` is the scan_groups result (default: scan the pattern). Walks a binary copy (O(1) indexing
+    # on a non-ASCII pattern) and returns the pattern's encoding.
+    def self.js_to_onigmo(pattern, scan = nil)
       enc = pattern.encoding
-      pattern = pattern.b
+      pattern = binary(pattern)
       out = String.new(encoding: Encoding::BINARY)
       i = 0
       n = pattern.length
       in_class = false
       pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
-      group_names, _, plan = scan_groups(pattern) unless group_names
-      plan ||= {}
+      group_names, _, plan = scan || scan_groups(pattern)
       named = group_names.any?
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
           if !in_class && (r = plan[i])
-            out << r[1]
-            i += r[0]
+            if r[1] == :empty
+              out << "(?:)"
+            else
+              ref = pattern[(i + 1)...r[0]]
+              nm = ref.start_with?("k") ? ref[2..-2] : (named && group_names[ref.to_i - 1])
+              out << (nm ? "(?(<#{nm}>)\\k<#{nm}>)" : "(?(#{ref})\\#{ref})")
+            end
+            i = r[0]
             next
           end
           l = pattern[i + 1]
@@ -371,6 +380,15 @@ module Camada
         i += 1
       end
       out.force_encoding(enc)
+    end
+
+    def self.over_one?(digits)
+      digits = digits.sub(/\A0+/, "") # a digit-string test: to_i on a huge one is slow
+      digits.length > 1 || digits > "1"
+    end
+
+    def self.binary(str)
+      str.encoding == Encoding::BINARY ? str : str.b
     end
 
     def self.brace_quantifier(match)
