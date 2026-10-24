@@ -196,6 +196,8 @@ RSpec.describe Camada::Snapshot do
       "^[a\\s]$" => [["\u00a0", true], ["a", true], ["b", false]],
       "^[^a\\s]$" => [["\u00a0", false], ["a", false], ["b", true]],
       "^[a-\\sz]$" => [["-", true], ["m", false], ["z", true], [" ", true]],
+      "^[\\s-a-z]$" => [["b", false], ["-", true], ["z", true], ["a", true]], "^[\\s-\\x41-z]$" => [["b", false], ["-", true]],
+      "^[\\s-\\d-z]$" => [["b", false]], "^[\\s-ab-z]$" => [["c", true]], "^[a-\\s-z]$" => [["b", false], ["-", true]],
       "^[\\sa-]$" => [["-", true], ["a", true]], "^[a\\s-z]$" => [["-", true], ["m", false]],
       "^[\\s^]$" => [["^", true], [" ", true], ["a", false]], "^[^\\s^]$" => [["^", false], ["a", true]],
       "^[\\S\\d]$" => [[" ", false], ["a", true]], "^[^\\S]$" => [[" ", true], ["a", false]]
@@ -391,5 +393,10 @@ RSpec.describe "Camada::Snapshot matches cap" do
   it "percent-encodes raw control characters in the raw form only" do
     expect(Camada::Snapshot.path_forms("/a\nb\x00\x7f")).to eq(%w[/a%0ab%00%7f] * 3)
     expect(Camada::Snapshot.path_forms("/x/\xFF\n".b)[0]).to eq("/x/\xFF%0a".b)
+  end
+
+  it "does not backtrack exponentially on an overlapping class union" do
+    rx = Camada::Snapshot.compile_regex("^[ \\s]+x")
+    expect(Camada::Snapshot.regex_hit?(rx, " " * 3000)).to be(false)
   end
 end

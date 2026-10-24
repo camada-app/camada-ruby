@@ -157,7 +157,8 @@ module Camada
     # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `.` -> JS_DOT, `[]` ->
     # `(?!)` (never matches; a `]` right after `[`/`[^` closes the class, a stray `]` -> `\]`), and
     # `\s`/`\S` -> the JS whitespace set; inside a class they are pulled out and the class becomes
-    # a union with them (`[a\s]` -> `(?:[a]|[WS])`), a `-` beside one stays a literal dash, as in JS.
+    # a union with them (`[a\s]` -> `(?:(?=[a]|[WS])[\s\S])`: a lookahead, so each char matches one way only, no
+    # ReDoS), a `-` beside one stays a literal dash, as in JS, and so does a `-` right after the atom that follows it.
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
       out = +""
@@ -166,7 +167,7 @@ module Camada
       in_class = false
       cstart = neg = nil
       pulled = []
-      pull_end = -1 # where the last pulled \\s/\\S ended
+      pull_end = solo_end = -1 # where the last pulled \\s/\\S ended; where the atom after its dash ended
       named = pattern.match?(/\(\?<(?![=!])/)
       while i < n
         ch = pattern[i]
@@ -201,7 +202,13 @@ module Camada
             i += 1
             next
           end
-          ch = "\\-" if ch == "-" && (pull_end == i || pattern.match?(/\G-\\[sS]/, i))
+          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
+            if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
+              m = pattern[i + 1] == "\\" && pattern.match(JS_ESCAPE, i + 2)
+              solo_end = i + (pattern[i + 1] == "\\" ? 3 : 2) - (m ? 1 : 0) + (m ? m[0].length : 0)
+            end
+            ch = "\\-"
+          end
         elsif ch == "."
           out << JS_DOT
           i += 1
@@ -254,8 +261,8 @@ module Camada
       alts = pulled.uniq.map { |l| "[#{"^" if l == "S"}#{JS_WS}]" }
       alts.unshift("[#{body}]") unless body.empty?
       u = alts.join("|")
-      u = "(?:#{u})" unless alts.one?
-      out << (neg ? "(?:(?!#{u})[\\s\\S])" : u)
+      look = neg ? "!" : "="
+      out << (neg || !alts.one? ? "(?:(?#{look}#{u})[\\s\\S])" : u)
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
