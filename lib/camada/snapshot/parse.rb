@@ -158,30 +158,24 @@ module Camada
     # reads it as exact-n, Onigmo as optional). `\<letter>` outside JS's escape set is the bare
     # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `.` -> JS_DOT, `[]` ->
     # `(?!)` (never matches; a `]` right after `[`/`[^` closes the class, a stray `]` -> `\]`), and
-    # `\s`/`\S` -> the JS whitespace set; inside a class they are pulled out and the class becomes
-    # a union with them (`[a\s]` -> `(?:(?=[a]|[WS])[\s\S])`: a lookahead, so each char matches one way only, no
-    # ReDoS), a `-` beside one stays a literal dash, as in JS, and so does a `-` right after the atom that follows it.
+    # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
+    # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
+    # and so does a `-` right after the atom that follows it.
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
       out = +""
       i = 0
       n = pattern.length
       in_class = false
-      cstart = neg = nil
-      pulled = []
-      pull_end = solo_end = -1 # where the last pulled \\s/\\S ended; where the atom after its dash ended
+      pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
       named = pattern.match?(/\(\?<(?![=!])/)
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
           l = pattern[i + 1]
           if l == "s" || l == "S"
-            if in_class
-              pulled << JS_SPACE[l]
-              pull_end = i + 2
-            else
-              out << JS_SPACE[l]
-            end
+            out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom, safe in a lookbehind
+            pull_end = i + 2 if in_class
             i += 2
             next
           end
@@ -200,7 +194,7 @@ module Camada
         if in_class
           if ch == "]"
             in_class = false
-            pulled.empty? ? out << "]" : close_js_class(out, cstart, neg, pulled)
+            out << "]"
             i += 1
             next
           end
@@ -226,8 +220,6 @@ module Camada
             i = j + 1
             next
           end
-          cstart = out.length
-          pulled = []
           out << pattern[i...j]
           i = j
           in_class = true
@@ -251,21 +243,6 @@ module Camada
         i += 1
       end
       out
-    end
-
-    # Rebuild a JS class that held \s/\S as the union of its body and those sets.
-    def self.close_js_class(out, cstart, neg, pulled)
-      body = out.slice!(cstart..)[(neg ? 2 : 1)..]
-      pulled = pulled.uniq
-      any = pulled.size == 2 # \s and \S together: any char
-      return out << (neg ? "(?!)" : "[\\s\\S]") if any
-
-      body = "\\#{body}" if body.start_with?("^")
-      alts = pulled.dup
-      alts.unshift("[#{body}]") unless body.empty?
-      u = alts.join("|")
-      look = neg ? "!" : "="
-      out << (neg || !alts.one? ? "(?:(?#{look}#{u})[\\s\\S])" : u)
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
