@@ -161,6 +161,7 @@ module Camada
     # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
     # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
     # and so does a `-` right after the atom that follows it.
+    # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
       out = +""
@@ -205,6 +206,7 @@ module Camada
             end
             ch = "\\-"
           end
+          ch = "\\#{ch}" if ch == "[" || ch == "&" # JS: `[[:alpha:]]` is {[ : a l p h} then `]`
         elsif ch == "."
           out << JS_DOT
           i += 1
