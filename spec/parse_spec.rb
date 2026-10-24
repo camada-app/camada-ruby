@@ -184,6 +184,11 @@ RSpec.describe Camada::Snapshot do
       cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
     end
     expect(Camada::Snapshot.js_to_onigmo("\\x{2}?")).to eq("x{2}")
+    # a numbered backreference beside named groups: Onigmo rejects \1 there, so it reads as \k<name>
+    bref = Camada::Snapshot.compile_regex("^(?<n>a)\\1$")
+    expect(bref.match?("aa")).to be(true)
+    expect(bref.match?("ab")).to be(false)
+    expect(Camada::Snapshot.compile_regex("(?<x>[(])(?<y>b)\\2\\1").match?("(bb(")).to be(true)
     expect(Camada::Snapshot.compile_regex("a{2,3}?").match("aaa")[0]).to eq("aa")
     %w[\\p{L} \\u{1F600}].each do |pat|
       expect do
