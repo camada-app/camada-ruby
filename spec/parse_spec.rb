@@ -138,9 +138,8 @@ RSpec.describe Camada::Snapshot do
     expect(nested).to match("a]")
     expect(nested).to match("[]")
     expect(nested).not_to match("b")
-    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("&")
-    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("a")
-    expect(Camada::Snapshot.compile_regex("[a&&b]")).to match("b")
+    amp = Camada::Snapshot.compile_regex("[a&&b]")
+    %w[& a b].each { |v| expect(amp).to match(v) }
   end
 
   it "reads a non-JS brace as text" do
