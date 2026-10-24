@@ -165,10 +165,7 @@ module Camada
       scan = scan_groups(bin)
       return nil if scan[1]
 
-      source = js_to_onigmo(bin, scan)
-      return nil unless source
-
-      source = source.force_encoding(pattern.encoding)
+      source = js_to_onigmo(bin, scan).force_encoding(pattern.encoding)
       verbose = $VERBOSE
       begin
         $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
@@ -350,7 +347,7 @@ module Camada
     # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
-    # Returns nil on a modifier group (see compile_regex).
+    # Raises RegexpError on a modifier group (see compile_regex).
     # `scan` is the scan_groups result (default: scan the pattern). Walks a binary copy (O(1) indexing
     # on a non-ASCII pattern) and returns the pattern's encoding.
     def self.js_to_onigmo(pattern, scan = nil)
@@ -420,7 +417,7 @@ module Camada
           end
           ch = "\\#{ch}" if ch == "[" || ch == "&" # JS: `[[:alpha:]]` is {[ : a l p h} then `]`
         elsif ch == "(" && pattern.match?(JS_MODIFIER, i)
-          return nil
+          raise RegexpError, "JS modifier group" # compile_regex fails open
         elsif ch == "."
           out << JS_DOT
           i += 1
