@@ -137,7 +137,8 @@ module Camada
     # A pattern this runtime rejects never matches, and never throws (fail open). Patterns are
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
-    # Ruby by default, as JS reads them.
+    # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
+    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     def self.compile_regex(pattern, options = 0)
       Regexp.new(js_to_onigmo(pattern), options)
     rescue RegexpError, TypeError, ArgumentError, EncodingError
