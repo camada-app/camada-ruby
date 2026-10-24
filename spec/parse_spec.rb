@@ -214,6 +214,8 @@ RSpec.describe Camada::Snapshot do
      '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1',
      '(b*)+x\1', '(b|)+x\1', '(a?)+x\1', '\1(b*)+x\1', '(?:(b*))+x\1', '(?<m>b*)+x\k<m>', # a plain reference to a repeat that can match empty
      '(\x41?)+x\1', '(é?)+x\1', '([a]?)+x\1', '(a{0,2})+x\1',
+     '((?i:a?))+x\1', '((?i-m:a?))+x\1', '((?-i:a?))+x\1', '((?m:b*))+x\1', # modifier headers are no atoms
+     '(?:(?i:(b*)))+x\1', '(?i:(b*))+x\1', '(?<m>(?i:b*))+x\k<m>',
      '(?:(?<a>b*)\k<a>)+x\k<a>'].each do |pat|
       expect(rx.call(pat)).to(be_nil, pat)
     end
