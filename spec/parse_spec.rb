@@ -217,7 +217,8 @@ RSpec.describe Camada::Snapshot do
      '(\x41?)+x\1', '(é?)+x\1', '([a]?)+x\1', '(a{0,2})+x\1',
      '((?i:a?))+x\1', '((?i-m:a?))+x\1', '((?-i:a?))+x\1', '((?m:b*))+x\1', # modifier headers are no atoms
      '(?:(?i:(b*)))+x\1', '(?i:(b*))+x\1', '(?<m>(?i:b*))+x\k<m>',
-     '(?:(?<a>b*)\k<a>)+x\k<a>'].each do |pat|
+     '(?:(?<a>b*)\k<a>)+x\k<a>',
+     '(b*){2,3}x\1', '(b*){2,}x\1', '(?:(b*){2})+x\1', '(?:((?:b+|(?=x))){2}c?)+x\1'].each do |pat| # exact counts compile, below
       expect(rx.call(pat)).to(be_nil, pat)
     end
     # node's answers (new RegExp("^(?:" + pat + ")$").test(s)): [matching, not matching]
@@ -230,7 +231,10 @@ RSpec.describe Camada::Snapshot do
       '(a){1,2}\1' => [%w[aaa], []], '(a)+x\1' => [%w[axa], %w[ax]], '(\w)+\1' => [%w[aa abb], %w[a ab]],
       '(?:(b)c?)+x\1' => [%w[bxb bcbxb], %w[bx]], '(a{1,2})+x\1' => [%w[axa aaxa], %w[ax]],
       '(?=(?:a)?(b?))a\1' => [%w[ab a], %w[abb]], '(?=(a))a\1' => [%w[aa], %w[a]], '(?:(a)|b)(?=(\1))\2' => [%w[aa b], %w[a aaa]],
-      '(\x41)+x\1' => [%w[AxA], %w[Ax]], '(?:(a?)\1)+' => [["", "aa", "aaaa"], %w[a aaa]] }.each do |pat, (yes, no)|
+      '(\x41)+x\1' => [%w[AxA], %w[Ax]],
+      '(b*){2}x\1' => [%w[bbx bxb bx], %w[xb]], '(b*){2,2}x\1' => [%w[bbx bxb], %w[xb]],
+      '(?:(b*)){3}x\1' => [%w[bbx], %w[xb]], '(a*){2}x\1' => [%w[axa], %w[axaa]],
+      '(?:(a?)\1)+' => [["", "aa", "aaaa"], %w[a aaa]] }.each do |pat, (yes, no)|
       re = rx.call("^(?:#{pat})$")
       yes.each { |s| expect(re&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
       no.each { |s| expect(re&.match?(s)).to(be(false), "#{pat} on #{s.inspect}") }
