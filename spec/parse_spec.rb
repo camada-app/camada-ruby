@@ -201,6 +201,16 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
+  it "clamps a JS quantifier bound above Onigmo's 100000 (camada-all-yh2t)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    expect(rx.call("^a{1,99999999999}$")).to match("a")
+    expect(rx.call("^a{1,99999999999}$")).not_to match("b")
+    expect(rx.call("^a{99999999999}$")).not_to be_nil
+    expect(rx.call("^a{99999999999,}$")).not_to be_nil
+    expect(rx.call("^(?:ab){1,99999999999}$")).to match("abab")
+    expect(Camada::Snapshot.js_to_onigmo("^a{2,3}$")).to eq("\\Aa{2,3}\\z")
+  end
+
   it "fails open on an unterminated class after \\s-" do
     ["[a\\s-", "[\\s-"].each { |p| expect { expect(Camada::Snapshot.compile_regex(p)).to be_nil }.not_to raise_error }
   end
