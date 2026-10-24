@@ -198,6 +198,8 @@ module Camada
     # ancestor, fails open too: JS matches a lookbehind right to left ("closed before the reference" is backwards
     # there; a quantified group keeps its leftmost repetition). Beside named groups, a `\k<name>` naming no group
     # is a JS SyntaxError: fail open (Onigmo aborts the process on it).
+    # So does a plain reference to a group in a positive lookahead that holds a quantified frame with optional
+    # iterations and a body that can match empty (JS rejects the empty iteration, so the lookahead's first success differs).
     # Walks a binary copy (O(1) indexing; the syntax is ASCII), so the names come back binary.
     # After the walk one forward pass over the frames (a parent precedes its children) settles, per
     # frame, what its ancestors imply, so each reference costs O(1) however deeply its group nests.
@@ -268,8 +270,12 @@ module Camada
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
       named = names.any?
+      frames.drop(1).reverse_each do |f| # children before parents
+        f[:parent][:holds] ||= f[:holds] || ((f[:zero] || f[:rep]) && f[:nullable]) # holds an optional nullable repeat
+      end
       frames.drop(1).each do |f|
         p = f[:parent]
+        f[:la_div] = (f[:la] && f[:holds]) || p[:la_div]
         f[:in_lb] = f[:lb] || p[:in_lb]
         f[:unset] = f[:zero] || f[:neg] || p[:alt] || p[:unset] # may not have captured when a reference runs
         f[:rep_above] = p[:rep] || p[:rep_above] # a strict ancestor repeats
@@ -299,6 +305,7 @@ module Camada
         # a repeat that can match empty: Onigmo's last empty iteration overwrites the capture, JS keeps it
         next true if (rn = g[:rn]) && rn[:end] < pos
 
+        next true if g[:la_div]
         next false unless g[:unset]
         next true if g[:rep_above] || g[:rep] || g[:in_la]
 
