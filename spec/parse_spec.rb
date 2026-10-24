@@ -252,10 +252,12 @@ RSpec.describe Camada::Snapshot do
 
   it "translates a large non-ASCII pattern in linear time and keeps its meaning (camada-all-ffbk)" do
     big = "é(a)\\1" * 20_000
-    t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    rx = Camada::Snapshot.compile_regex(big)
-    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t).to be < 0.2
-    expect(rx).not_to be_nil
+    best = Array.new(3) do # best of three: a busy machine adds noise, never a quadratic walk's seconds
+      t = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(Camada::Snapshot.compile_regex(big)).not_to be_nil
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
+    end.min
+    expect(best).to be < 0.2
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call("[é-ü]").match?("ö")).to be(true)
     expect(rx.call("[é-ü]").match?("a")).to be(false)
