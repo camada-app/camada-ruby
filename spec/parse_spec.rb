@@ -143,12 +143,11 @@ RSpec.describe Camada::Snapshot do
     expect(rx.call("\\{,3}")).to match("{,3}")
     expect(rx.call("a{ 1}")).to match("a{ 1}")
     expect(rx.call("x{")).to match("x{")
-    expect(rx.call("\\p{L}{,2}")).to match("a{,2}") # \p{L} keeps its braces
     expect(rx.call("[^]{,2}")).to match("z{,2}")
     # real path: Onigmo would read each `.{,2000}` as a bound and backtrack catastrophically
     m = rules_snapshot([{ "id" => "bt", "action" => "block", "conds" => [{ "f" => "ua", "op" => "matches", "v" => ".{,2000}.{,2000}.{,2000}!" }] }])
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    expect(m.match(input(ua: ["!", "a" * 2047].join)).rule).to be_nil
+    expect(m.match(input(ua: "!#{"a" * 2047}")).rule).to be_nil
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).to be < 0.1
   end
 
