@@ -175,10 +175,11 @@ module Camada
       names
     end
 
-    JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
+    JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
+    ONIGMO_REPEAT_MAX = 100_000 # Onigmo rejects a repeat number above this ("too big number for repeat range")
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
-    JS_ATOM = /\G(?:\\(?:c[A-Za-z]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|[\s\S])|[\s\S])/ # one class atom
+    JS_ATOM = /\G(?:\\(?:c[A-Za-z0-9_]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|(?!c)[\s\S])|[\s\S])/ # one class atom
     JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
@@ -192,6 +193,10 @@ module Camada
     # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
     # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
     # and so does a `-` right after the atom that follows it.
+    # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
+    # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
+    # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
+    # exact for any input shorter than n), where JS accepts it (camada-all-yh2t).
     # A literal `[` or `&` in a class is escaped (no nesting, POSIX class or `&&`, as in JS).
     # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
@@ -212,8 +217,8 @@ module Camada
             i += 2
             next
           end
-          if l == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
-            out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
+          if l == "c" && pattern[i + 2]&.match?(in_class ? /[A-Za-z0-9_]/ : /[A-Za-z]/) # JS Annex B: `[\c1]` too
+            out << Regexp.escape((pattern[i + 2].ord & 0x1F).chr)
             i += 3
             next
           end
@@ -226,7 +231,7 @@ module Camada
             end
           end
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
-                 (l == "k" && named) || (l == "c" && in_class)
+                 (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           out << (kept ? pattern[i, 2] : l)
           i += 2
@@ -277,7 +282,7 @@ module Camada
           next
         elsif ch == "{"
           m = pattern.match(JS_BRACE, i)
-          out << (m ? m[0] : "\\{")
+          out << (m ? brace_quantifier(m) : "\\{")
           i += m ? m[0].length : 1
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
@@ -286,6 +291,21 @@ module Camada
         i += 1
       end
       out
+    end
+
+    def self.brace_quantifier(match)
+      lo, comma, hi = match.captures.map { |d| d&.sub(/\A0+(?=.)/, "") } # canonical: no leading zeros
+      # m > n is a JS SyntaxError: leave it as written for Onigmo to reject
+      return match[0] if hi.to_s != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
+
+      lo = ONIGMO_REPEAT_MAX.to_s if over_repeat_max?(lo)
+      hi = "" if over_repeat_max?(hi) # an upper bound past it never binds a real input
+      "{#{lo}#{comma}#{hi}}"
+    end
+
+    def self.over_repeat_max?(digits)
+      digits = digits.to_s # nil: `{m}` has no upper bound
+      digits.length > 6 || digits.to_i > ONIGMO_REPEAT_MAX # length first: to_i on a huge digit string is slow
     end
 
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
