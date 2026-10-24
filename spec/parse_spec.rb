@@ -201,6 +201,33 @@ RSpec.describe Camada::Snapshot do
     end
   end
 
+  it "clamps a JS quantifier bound above Onigmo's 100000 (camada-all-yh2t)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    expect(rx.call("^a{1,99999999999}$")).to match("a")
+    expect(rx.call("^a{1,99999999999}$")).not_to match("b")
+    expect(rx.call("^a{99999999999}$")).not_to be_nil
+    expect(rx.call("^a{99999999999,}$")).not_to be_nil
+    expect(rx.call("^(?:ab){1,99999999999}$")).to match("abab")
+    expect(rx.call("^a{1,#{"9" * 5000}}$")).to match("a")
+    ["a{100001,100000}", "a{99999999999,99999999998}", "a{2,1}"].each { |p| expect(rx.call(p)).to be_nil }
+    expect(rx.call("^a{0002,03}$")).to match("aa")
+    expect(rx.call("^a{0002,03}$")).not_to match("a")
+    expect(Camada::Snapshot.js_to_onigmo("^a{2,3}$")).to eq("\\Aa{2,3}\\z")
+  end
+
+  it "reads \\c in a class as a control char only before a letter, digit or _ (camada-all-mqcb)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    {
+      "^[\\c*]$" => [["\\", true], ["c", true], ["*", true], ["j", false]],
+      "^[\\c1]$" => [["\u0011", true], ["q", false]], "^[\\c_]$" => [["\u001f", true]],
+      "^[\\s-\\c-x]$" => [["-", true], ["\\", true], ["d", true], ["y", false]],
+      "^\\c1$" => [["\\c1", true]]
+    }.each do |pat, cases|
+      cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
+    end
+    ["[\\c]", "[\\c"].each { |p| expect { rx.call(p) }.not_to raise_error }
+  end
+
   it "fails open on an unterminated class after \\s-" do
     ["[a\\s-", "[\\s-"].each { |p| expect { expect(Camada::Snapshot.compile_regex(p)).to be_nil }.not_to raise_error }
   end
