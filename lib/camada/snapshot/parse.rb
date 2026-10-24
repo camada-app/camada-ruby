@@ -150,7 +150,10 @@ module Camada
     # the control character, and the anchors: JS `^`/`$` bind the whole input while Ruby's are
     # line anchors, so outside a class they become `\A`/`\z`; a `{` that is no JS quantifier
     # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound). `(?<name>` is native to
-    # Onigmo. Anything else Ruby rejects still fails open.
+    # Onigmo. Anything else Ruby rejects still fails open. JS (no u flag) reads `\<letter>` as the
+    # bare letter unless it is a class/escape (b B d D f n r s S t v w W, \cX, \xHH, \uHHHH, \k
+    # with a named group; in a class \B too), so `\p{L}` is the text "p{L}", not a property; and
+    # `x{n}?` is exact-n (Onigmo reads it as optional), so the `?` is dropped.
     def self.js_to_onigmo(pattern)
       out = +""
       i = 0
@@ -164,7 +167,12 @@ module Camada
             i += 3
             next
           end
-          out << pattern[i, 2]
+          l = pattern[i + 1]
+          keep = !l.match?(/[A-Za-z]/) || "bdDfnrsStvwWc".include?(l) || (l == "B" && !in_class) ||
+                 (l == "x" && pattern.match?(/\G[0-9a-fA-F]{2}/, i + 2)) ||
+                 (l == "u" && pattern.match?(/\G[0-9a-fA-F]{4}/, i + 2)) ||
+                 (l == "k" && pattern.match?(/\(\?<[^=!]/))
+          out << (keep ? pattern[i, 2] : l)
           i += 2
           next
         end
@@ -188,6 +196,10 @@ module Camada
         elsif ch == "{" && !pattern.match?(JS_BRACE, i)
           out << "\\{"
           i += 1
+          next
+        elsif ch == "{" && (m = pattern.match(/\G\{[0-9]+\}(?=\?)/, i))
+          out << m[0]
+          i += m[0].length + 1
           next
         end
         out << ch
