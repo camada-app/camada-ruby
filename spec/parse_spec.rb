@@ -210,7 +210,7 @@ RSpec.describe Camada::Snapshot do
      '(a)*\1', '(a)*x\1', '(a){0,2}x\1', # an empty last iteration (node rejects it, Onigmo takes it)
      '(b*)*x\1', '(b|)*x\1', '(a?){0,2}x\1', '(?:(?=(a)))?a\1', '(?=(a))?a\1', '(?=(a)){0,1}a\1',
      '(?<a>x)(?=(?<b>y))?y\k<b>', # a capture in a lookahead a min-0 quantifier covers
-     '(?=(?:a??)?(b?))a\1', '(?=(?:|a)?(b?))a\1', '(?=(?:a*?)*(b?))a\1', '(?=x(?=(?:a??)?(b?)))xa\1',
+     '(?=(?:a??)?(b?))a\1', '(?=(?:|a)?(b?))a\1', '(?=(?:a*?)*(b?))a\1', '(?=x(?=(?:a??)?(b?)))xa\1', '(?=(?:a??)?(?<n>b?))a\k<n>',
      '(?=(a??)?)\1a', '(?=(?:a??)?(b)?)a\1', '(?=(a*?){0,1})[ab]*\1', '(?=x(?<n>a??(x)*|){0,1})x\k<n>', # a conditional reference into a lookahead
      '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1',
      '(b*)+x\1', '(b|)+x\1', '(a?)+x\1', '\1(b*)+x\1', '(?:(b*))+x\1', '(?<m>b*)+x\k<m>', # a plain reference to a repeat that can match empty
