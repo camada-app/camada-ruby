@@ -145,6 +145,10 @@ module Camada
     end
 
     JS_BRACE = /\G\{[0-9]+(?:,[0-9]*)?\}/
+    JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
+    JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
+    JS_ATOM = /\G(?:\\(?:c[A-Za-z]|x\h{2}|u\h{4}|[0-3][0-7]{0,2}|[4-7][0-7]?|[\s\S])|[\s\S])/ # one class atom
+    JS_DOT = "[^\\n\\r\\u2028\\u2029]" # JS . (Onigmo's excludes only \n)
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
     # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
@@ -152,18 +156,29 @@ module Camada
     # line anchors, so outside a class they become `\A`/`\z`; a `{` that is no JS quantifier
     # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound), and `x{n}?` -> `x{n}` (JS
     # reads it as exact-n, Onigmo as optional). `\<letter>` outside JS's escape set is the bare
-    # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `(?<name>` is native to
-    # Onigmo. Anything else Ruby rejects still fails open.
+    # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `.` -> JS_DOT, `[]` ->
+    # `(?!)` (never matches; a `]` right after `[`/`[^` closes the class, a stray `]` -> `\]`), and
+    # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
+    # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
+    # and so does a `-` right after the atom that follows it.
+    # `(?<name>` is native to Onigmo. Anything else Ruby rejects still fails open.
     def self.js_to_onigmo(pattern)
       out = +""
       i = 0
       n = pattern.length
       in_class = false
+      pull_end = solo_end = -1 # where the last in-class \\s/\\S ended; where the atom after its dash ended
       named = pattern.match?(/\(\?<(?![=!])/)
       while i < n
         ch = pattern[i]
         if ch == "\\" && i + 1 < n
           l = pattern[i + 1]
+          if l == "s" || l == "S"
+            out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom, safe in a lookbehind
+            pull_end = i + 2 if in_class
+            i += 2
+            next
+          end
           if l == "c" && i + 2 < n && pattern[i + 2].match?(/[A-Za-z]/)
             out << Regexp.escape((pattern[i + 2].upcase.ord - 64).chr)
             i += 3
@@ -177,14 +192,39 @@ module Camada
           next
         end
         if in_class
-          in_class = ch != "]"
-        elsif ch == "["
-          if pattern[i, 3] == "[^]"
-            out << "[\\s\\S]"
-            i += 3
+          if ch == "]"
+            in_class = false
+            out << "]"
+            i += 1
             next
           end
+          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
+            if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
+              m = pattern.match(JS_ATOM, i + 1) # nil when the pattern ends on the dash
+              solo_end = m ? i + 1 + m[0].length : pattern.length
+            end
+            ch = "\\-"
+          end
+        elsif ch == "."
+          out << JS_DOT
+          i += 1
+          next
+        elsif ch == "]"
+          out << "\\]"
+          i += 1
+          next
+        elsif ch == "["
+          neg = pattern[i + 1] == "^"
+          j = i + (neg ? 2 : 1)
+          if pattern[j] == "]"
+            out << (neg ? "[\\s\\S]" : "(?!)")
+            i = j + 1
+            next
+          end
+          out << pattern[i...j]
+          i = j
           in_class = true
+          next
         elsif ch == "^"
           out << "\\A"
           i += 1
