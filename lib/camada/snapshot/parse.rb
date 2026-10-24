@@ -134,6 +134,19 @@ module Camada
       cmp_words(r, o, w) <= 0 && cmp_words(r, o + 4, w) >= 0 # rubocop:disable Style/ComparableBetween -- two different comparisons
     end
 
+    # regex-limit v1: the longest one customer regex may run, and what one request's rule walk may spend on all of them.
+    MATCH_BUDGET_MS = 50
+    REQUEST_REGEX_BUDGET_MS = 100
+    MATCH_TIMEOUT = Regexp.respond_to?(:timeout) ? MATCH_BUDGET_MS / 1000.0 : nil
+
+    # Runs the block with a fresh per-request regex budget (seconds left, in request-scoped state), reset in ensure.
+    def self.with_regex_budget
+      Thread.current[:camada_regex_budget] = REQUEST_REGEX_BUDGET_MS / 1000.0
+      yield
+    ensure
+      Thread.current[:camada_regex_budget] = nil
+    end
+
     # A pattern this runtime rejects never matches, and never throws (fail open). Patterns are
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
@@ -155,7 +168,9 @@ module Camada
       verbose = $VERBOSE
       begin
         $VERBOSE = nil # `[a\S]` expands to a class with a duplicated range; Onigmo warns under -w, matching is right
-        Regexp.new(source, options)
+        # Ruby >= 3.2: a per-regex match bound (regex-limit v1). Never the global Regexp.timeout, that is the host app's.
+        # Ruby 3.1 has no match-time bound and rejects the keyword, so it compiles without it.
+        MATCH_TIMEOUT ? Regexp.new(source, options, timeout: MATCH_TIMEOUT) : Regexp.new(source, options)
       ensure
         $VERBOSE = verbose
       end
@@ -425,10 +440,21 @@ module Camada
     # `on_error` is what a value the engine cannot read answers. The legacy block-side path regexes
     # keep false; a custom `matches` rule passes `deny` (regex-cap-sdk v1: an unevaluable value is a
     # hit for block/challenge/warn and a miss for skip, the same as an over-cap one, camada-all-cwb4).
+    #
+    # Inside a rule walk the request's regex budget is spent first: once it is gone the regex does not
+    # run and answers `on_error`, like an over-limit run (Regexp::TimeoutError is a StandardError).
     def self.regex_hit?(rx, value, on_error = false)
-      rx.match?(utf8_view(value))
-    rescue StandardError
-      on_error
+      left = Thread.current[:camada_regex_budget]
+      return on_error if left && left <= 0
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC) if left
+      begin
+        rx.match?(utf8_view(value))
+      rescue StandardError
+        on_error
+      ensure
+        Thread.current[:camada_regex_budget] = left - (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) if left
+      end
     end
 
     # A value tagged ASCII-8BIT (Rack) whose bytes are valid UTF-8 is read as UTF-8, so a non-ASCII
