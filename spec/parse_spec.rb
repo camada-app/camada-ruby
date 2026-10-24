@@ -191,12 +191,12 @@ RSpec.describe Camada::Snapshot do
   it "reads JS ., [] and \\s/\\S as JS does" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     {
-      "^.$" => [["\r", false], ["\u2028", false], ["\u2029", false], ["\n", false], ["a", true]],
+      "^.$" => [["\r", false], ["\u2028", false], ["\u2029", false], ["\n", false], ["a", true], ["\u{1F600}", true]],
       "^\\.$" => [[".", true], ["a", false]], "^[.]$" => [[".", true], ["a", false]],
       "[]a]" => [["a", false], ["]", false], ["a]", false]],
       "^[^]x]$" => [["qx]", true], ["x", false]], "a[]*b" => [["ab", true]],
       "^\\s$" => [[" ", true], ["\u2028", true], ["\u00a0", true], ["\ufeff", true], ["a", false]],
-      "^\\S$" => [[" ", false], ["\u2028", false], ["\u3000", false], ["a", true]],
+      "^\\S$" => [[" ", false], ["\u2028", false], ["\u3000", false], ["a", true], ["\u{1F600}", true]],
       "^[a\\s]$" => [["\u00a0", true], ["a", true], ["b", false]],
       "^[^a\\s]$" => [["\u00a0", false], ["a", false], ["b", true]],
       "^[a-\\sz]$" => [["-", true], ["m", false], ["z", true], [" ", true]],
@@ -207,7 +207,9 @@ RSpec.describe Camada::Snapshot do
       "^[\\sa-]$" => [["-", true], ["a", true]], "^[a\\s-z]$" => [["-", true], ["m", false]],
       "^[\\s^]$" => [["^", true], [" ", true], ["a", false]], "^[^\\s^]$" => [["^", false], ["a", true]],
       "^[\\S\\d]$" => [[" ", false], ["a", true]], "^[^\\S]$" => [[" ", true], ["a", false]],
-      "(?<=[a\\s])b" => [[" b", true], ["ab", true], ["cb", false]], "(?<![a\\s])b" => [[" b", false], ["cb", true]]
+      "(?<=[a\\s])b" => [[" b", true], ["ab", true], ["cb", false]], "(?<![a\\s])b" => [[" b", false], ["cb", true]],
+      # an astral char is one char here, two UTF-16 units in JS (accepted gap, camada-all-vuvo)
+      "^..$" => [["\u{1F600}", false]], "^[^a]$" => [["\u{1F600}", true]], "^a.*b$" => [["a\u{1F600}b", true]]
     }.each do |pat, cases|
       cases.each { |s, want| expect(rx.call(pat).match?(s)).to(be(want), "#{pat} on #{s.inspect}") }
     end
@@ -218,14 +220,6 @@ RSpec.describe Camada::Snapshot do
     ensure
       $VERBOSE = old
     end.not_to output.to_stderr
-  end
-
-  it "counts an astral char as one char, unlike JS's two UTF-16 units (accepted gap, camada-all-vuvo)" do
-    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
-    emoji = "\u{1F600}"
-    ["^.$", "^[^a]$", "^\\S$"].each { |p| expect(rx.call(p)).to match(emoji) }
-    ["^..$", "^.{2}$"].each { |p| expect(rx.call(p)).not_to match(emoji) }
-    expect(rx.call("^a.*b$")).to match("a#{emoji}b")
   end
 
   it "never raises on a value the pattern cannot read" do
