@@ -594,11 +594,11 @@ module Camada
     # A regex test that never raises: a value in an encoding the pattern cannot read (a binary
     # PATH_INFO with high bytes, say) reads as "no match" rather than an exception on the request path.
     #
-    # `on_error` is what a value the engine cannot read answers. The legacy block-side path regexes
-    # keep false; a custom `matches` rule passes `deny` (regex-cap-sdk v1: an unevaluable value is a
+    # `on_error` is what a value the engine cannot read answers. A caller with no side passes false;
+    # a `matches` condition (a custom rule or a meta `pathsRegex` entry) passes `deny` (regex-cap-sdk v1: an unevaluable value is a
     # hit for block/challenge/warn and a miss for skip, the same as an over-cap one, camada-all-cwb4).
     #
-    # Inside a rule walk the request's regex budget is spent first: once it is gone the regex does not
+    # Inside a match decision the request's regex budget is spent first: once it is gone the regex does not
     # run and answers `on_error`, like an over-limit run (Regexp::TimeoutError is a StandardError).
     def self.regex_hit?(rx, value, on_error = false)
       left = Thread.current[:camada_regex_budget]
@@ -752,12 +752,12 @@ module Camada
       false
     end
 
-    # One path form against a side's (or the block side's) exact, prefix and regex entries.
+    # One path form against a side's (or the block side's) exact, prefix and regex predicates.
     def self.path_in?(st, path, regexes = [])
       return true if st.paths_exact.include?(path)
       return true if !st.paths_prefix.empty? && prefix_hit?(st.paths_prefix, path)
 
-      regexes.any? { |rx| regex_hit?(rx, path) }
+      regexes.any? { |pred| pred.call(path) }
     end
 
     # Does the block hold for this request's path? deny = any spelling; an exemption = both canonical forms.
@@ -944,7 +944,7 @@ module Camada
         tls: (meta["tls"] || []).to_set,
         paths_exact: (meta["pathsExact"] || []).to_set { |p| canon_path(p.to_s) },
         paths_prefix: (meta["pathsPrefix"] || []).to_set { |p| dir_key(p.to_s) },
-        paths_regex: (meta["pathsRegex"] || []).filter_map { |p| compile_regex(p, Regexp::IGNORECASE) },
+        paths_regex: (meta["pathsRegex"] || []).map { |p| path_pred("matches", [p], true) },
         allow: range_set(sec.fetch(10, EMPTY), sec.fetch(11, EMPTY), meta["allow"]),
         challenge: range_set(sec.fetch(12, EMPTY), sec.fetch(13, EMPTY), meta["challenge"]),
         rules: compile_rules(meta, rule4, rule6)
