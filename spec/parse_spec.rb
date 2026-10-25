@@ -755,3 +755,29 @@ RSpec.describe "Camada::Snapshot matches cap" do
     end
   end
 end
+
+RSpec.describe "Camada::Snapshot.path_hit?" do
+  def count(forms, deny, hit = [])
+    calls = 0
+    res = Camada::Snapshot.path_hit?(forms, deny) do |p|
+      calls += 1
+      hit.include?(p)
+    end
+    [res, calls]
+  end
+
+  it "tries a repeated path form once" do
+    same = Camada::Snapshot.path_forms("/blocked-path")
+    expect(same.uniq.size).to eq(1)
+    expect(count(same, true)).to eq([false, 1])
+    expect(count(same, false)).to eq([false, 1])
+    expect(count(same, true, ["/blocked-path"])).to eq([true, 1])
+    expect(count(same, false, ["/blocked-path"])).to eq([true, 1])
+    distinct = %w[/a /b /c]
+    expect(count(distinct, true)).to eq([false, 3])
+    expect(count(distinct, true, ["/c"])).to eq([true, 3])
+    expect(count(distinct, false, ["/b"])).to eq([false, 2])
+    expect(count(distinct, false, %w[/b /c])).to eq([true, 2])
+    expect(count(%w[/a /b /b], true)).to eq([false, 2])
+  end
+end

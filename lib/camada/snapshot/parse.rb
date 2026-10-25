@@ -762,7 +762,13 @@ module Camada
 
     # Does the block hold for this request's path? deny = any spelling; an exemption = both canonical forms.
     def self.path_hit?(forms, deny, &pred)
-      deny ? (pred.call(forms[0]) || pred.call(forms[1]) || pred.call(forms[2])) : (pred.call(forms[1]) && pred.call(forms[2]))
+      if deny
+        # a form equal to one already tried is not matched again, so a repeat never spends the request's regex budget twice
+        return pred.call(forms[0]) ||
+               (forms[1] != forms[0] && pred.call(forms[1])) ||
+               (forms[2] != forms[0] && forms[2] != forms[1] && pred.call(forms[2]))
+      end
+      pred.call(forms[1]) && (forms[2] == forms[1] || pred.call(forms[2]))
     end
 
     # One path condition -> a predicate over a single path form. A `matches` form over MAX_MATCH_INPUT
