@@ -700,6 +700,20 @@ RSpec.describe "Camada::Snapshot matches cap" do
       end
     end
 
+    # camada-all-fe1r
+    it "splits a one-char class from adjacent literals and splices \\W/\\D like \\S" do
+      { "(?<=s[s]s)x" => { "ssx" => false, "sssx" => true, "\u00e9\u00dfx" => false },
+        "(?<=[s]s)x" => { "\u00dfx" => false, "ssx" => true },
+        "(?<=a[\\W])x" => { "a\ufb00x" => true, "\u00e9a\ufb00x" => true, "aax" => false },
+        "(?<=a[\\D])x" => { "\u00e9a\ufb00x" => true, "a1x" => false },
+        "(?<=a[\\d\\D])x" => { "\u00e9a\ufb00x" => true, "a1x" => true } }.each do |pat, cases|
+        rx = ci.call(pat)
+        expect(rx).not_to be_nil, pat
+        cases.each { |v, want| expect(Camada::Snapshot.regex_hit?(rx, v, :err)).to be(want), "#{pat} #{v.inspect}" }
+      end
+      expect(Camada::Snapshot.js_to_onigmo("[s][\\W]x")).to eq("[s][\\W]x")
+    end
+
     it "still reads [^] as any char" do
       rx = ci.call("^a[^]b$")
       expect(rx.match?("a\nb")).to be(true)

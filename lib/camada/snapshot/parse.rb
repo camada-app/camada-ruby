@@ -384,7 +384,7 @@ module Camada
       lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
       lit_end = -1 # the pattern index right after the last literal emitted inside a lookbehind
       class_start = nil # the out index of an open positive class's `[` inside a lookbehind
-      class_s = false # that class held `\S`
+      class_alts = [] # the `\S`/`\W`/`\D` that class held
       last_named = {} # name -> the index of its last opener
       while i < n
         ch = pattern[i]
@@ -401,12 +401,14 @@ module Camada
             next
           end
           l = pattern[i + 1]
+          if in_class && class_start && (l == "S" || l == "W" || l == "D")
+            class_alts << (l == "S" ? JS_SPACE["S"] : "\\#{l}") # spliced in at the `]`: a positive class holding one gains multi-char folds
+            pull_end = i + 2 if l == "S"
+            i += 2
+            next
+          end
           if l == "s" || l == "S"
-            if in_class && l == "S" && class_start
-              class_s = true # spliced in at the `]`: a positive class holding \S gains multi-char folds
-            else
-              out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
-            end
+            out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
             pull_end = i + 2 if in_class
             i += 2
             next
@@ -449,14 +451,17 @@ module Camada
         if in_class
           if ch == "]"
             in_class = false
-            if class_s
+            if class_alts.any?
               rest = out.slice!(class_start..)[1..]
               rest = "\\#{rest}" if rest.start_with?("^") # `[^..]` would negate the spliced class
-              out << (rest.empty? ? JS_SPACE["S"] : "(?:#{JS_SPACE["S"]}|[#{rest}])")
-              class_s = false
+              alts = class_alts.join("|")
+              alts = "(?:#{alts}" + (rest.empty? ? ")" : "|[#{rest}])") if class_alts.length > 1 || !rest.empty?
+              out << alts
+              class_alts = []
             else
               out << "]"
             end
+            lit_end = i + 1 if class_start # Onigmo merges a one-char class into the literals beside it
             class_start = nil
             i += 1
             next
@@ -518,7 +523,10 @@ module Camada
             i = j + 1
             next
           end
-          class_start = out.length if !neg && lbs.last
+          if !neg && lbs.last
+            out << "(?:)" if lit_end == i
+            class_start = out.length
+          end
           out << pattern[i...j]
           i = j
           in_class = true
