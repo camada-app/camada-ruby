@@ -82,4 +82,33 @@ RSpec.describe "regex limit" do
       expect(r.rule).to be_nil
     end
   end
+
+  # camada-all-zpbv: a stored `matches` value that is "" or not a String never matches, over the cap or not.
+  describe "a non-string matches value" do
+    str = '123 0 1 true {"x"=>1} ["^/a"] [123]' # every coerced spelling of the values appears in the input
+    big = "a" * (Camada::Snapshot::MAX_MATCH_INPUT + 1)
+    blk = { "id" => "cr_blk", "action" => "block", "conds" => [{ "f" => "ip", "op" => "is_not", "v" => "1.1.1.1" }] }
+
+    [123, 0, true, nil, { "x" => 1 }, ["^/a"], [123], ""].each do |v|
+      %w[ua path header].each do |f|
+        [false, true].each do |over|
+          it "#{v.inspect} on #{f}#{" over the cap" if over}: block never matches, skip does not exempt" do
+            input = lambda do
+              Camada::Snapshot::MatchInput.new(
+                ip: "8.8.8.8",
+                path: over && f == "path" ? "/a/#{str}/#{big}" : "/a/#{str}",
+                ua: over && f == "ua" ? "#{str} #{big}" : str,
+                header: ->(_n) { over && f == "header" ? "#{str} #{big}" : str }
+              )
+            end
+            cond = { "f" => f, "op" => "matches", "v" => v }
+            cond["name"] = "x-h" if f == "header"
+            expect(matcher([{ "id" => "cr_b", "action" => "block", "conds" => [cond] }]).match(input.call).block).to be(false)
+            r = matcher([{ "id" => "cr_s", "action" => "skip", "conds" => [cond] }, blk]).match(input.call)
+            expect(r.rule).to eq("cr_blk")
+          end
+        end
+      end
+    end
+  end
 end
