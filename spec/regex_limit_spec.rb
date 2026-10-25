@@ -51,26 +51,20 @@ RSpec.describe "regex limit" do
     end
   end
 
-  vectors["refused"].each do |row|
-    it "#{row["id"]}: #{row["kind"]} runs natively" do
-      rule = vectors["refused_rule"].merge("conds" => [{ "f" => "ua", "op" => "matches", "v" => row["pattern"] }])
-      row["cases"].each do |c|
-        expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
+  %w[refused accepted_match].each do |key|
+    vectors[key].each do |row|
+      it "#{row["id"]}: #{row["kind"]} runs natively" do
+        rule = vectors["refused_rule"].merge("conds" => [{ "f" => "ua", "op" => "matches", "v" => row["pattern"] }])
+        row["cases"].each do |c|
+          expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
+        end
       end
     end
   end
 
-  it "has accepted_match rows" do
+  it "has rows to run natively" do
+    expect(vectors["refused"]).not_to be_empty
     expect(vectors["accepted_match"]).not_to be_empty
-  end
-
-  vectors["accepted_match"].each do |row|
-    it "#{row["id"]}: #{row["kind"]} matches natively" do
-      rule = vectors["refused_rule"].merge("conds" => [{ "f" => "ua", "op" => "matches", "v" => row["pattern"] }])
-      row["cases"].each do |c|
-        expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
-      end
-    end
   end
 
   describe "request budget" do
