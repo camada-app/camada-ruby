@@ -635,4 +635,75 @@ RSpec.describe "Camada::Snapshot matches cap" do
     end
     expect(Camada::Snapshot.compile_regex("[\\s\\t]x")).to match("\tx")
   end
+
+  # camada-all-ccjo: Onigmo's multi-char case folds must not make a lookbehind variable-length under /i
+  context "lookbehinds under IGNORECASE" do
+    let(:ci) { ->(p) { Camada::Snapshot.compile_regex(p, Regexp::IGNORECASE) } }
+
+    it "compiles a lookbehind holding [\\s\\S] or a dot and matches like JS" do
+      rx = ci.call("(?<=a[\\s\\S])x")
+      expect(rx).not_to be_nil
+      expect(rx.match?("a\nx")).to be(true)
+      expect(rx.match?("a\u00e9x")).to be(true)
+      rx = ci.call("(?<=(?:ss|k.))x")
+      expect(rx).not_to be_nil
+      %W[ssx k\u00e9x KAx SSx].each { |v| expect(rx.match?(v)).to be(true), v }
+      %W[k\nx ßx].each { |v| expect(rx.match?(v)).to be(false), v }
+      rx = ci.call("(?<=z(?:[\\s\\S]|e))x")
+      expect(rx).not_to be_nil
+      ["z x", "zEx"].each { |v| expect(rx.match?(v)).to be(true), v }
+    end
+
+    it "keeps a lone multi-char-fold literal a plain string and splits only adjacent literals" do
+      ["(?<=\ufb00)x", "(?<=\u01f0)x", "(?<!\ufb00)x"].each { |p| expect(ci.call(p)).not_to be_nil, p }
+      expect(ci.call("(?<=\ufb00)x").match?("\ufb00x")).to be(true)
+      expect(Camada::Snapshot.js_to_onigmo("(?<=ab)x")).to include("a(?:)b")
+      expect(Camada::Snapshot.js_to_onigmo("(?<=a)x")).to eq("(?<=a)x")
+    end
+
+    it "does not raise on a non-ASCII value for a literal run" do
+      { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
+        rx = ci.call(pat)
+        vals.each { |v| expect(Camada::Snapshot.regex_hit?(rx, v, :err)).to be(true), v }
+      end
+      expect(ci.call("(?<=ss)x").match?("\u00dfx")).to be(false)
+    end
+
+    it "escapes a caret after a leading \\S and keeps a digit escape whole" do
+      [0, Regexp::IGNORECASE].each do |f|
+        rx = Camada::Snapshot.compile_regex("(?<=[\\S^a])x", f)
+        expect(rx).not_to be_nil
+        expect(rx.match?(" x")).to be(false)
+        %w[^x bx].each { |v| expect(rx.match?(v)).to be(true), v }
+        rx = Camada::Snapshot.compile_regex("(?<=[\\S^])x", f)
+        expect(rx).not_to be_nil
+        expect(rx.match?("^x")).to be(true)
+      end
+      expect(Camada::Snapshot.js_to_onigmo("(?<=\\81)y")).to include("\\81")
+    end
+
+    it "keeps a positive class with \\S and other members, and a dash, like JS" do
+      rx = ci.call("(?<=a[x\\S])y")
+      expect(rx).not_to be_nil
+      %w[axy aéy aQy].each { |v| expect(rx.match?(v)).to be(true), v }
+      expect(rx.match?("a y")).to be(false)
+      rx = ci.call("(?<=a[\\S-x])y")
+      expect(rx).not_to be_nil
+      %w[a-y axy ayy].each { |v| expect(rx.match?(v)).to be(true), v }
+      expect(rx.match?("a y")).to be(false)
+    end
+
+    it "keeps an escape in a lookbehind whole" do
+      { "(?<=\\x41)x" => "Ax", "(?<=\\u0041)x" => "Ax", "(?<=a\\101)x" => "aAx" }.each do |pat, v|
+        expect(Camada::Snapshot.compile_regex(pat)&.match?(v)).to be(true), pat
+        expect(ci.call(pat)&.match?(v.swapcase)).to be(true), pat
+      end
+    end
+
+    it "still reads [^] as any char" do
+      rx = ci.call("^a[^]b$")
+      expect(rx.match?("a\nb")).to be(true)
+      expect(ci.call("(?<=[^])x").match?("\nx")).to be(true)
+    end
+  end
 end
