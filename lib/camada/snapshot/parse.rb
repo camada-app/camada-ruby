@@ -341,7 +341,7 @@ module Camada
     JS_NAME = /\A[\p{ID_Start}$_][\p{ID_Continue}$\u200c\u200d]*\z/ # a JS group name
     JS_ESCAPE = /\G(?:[bdDfnrsStvwW]|x\h{2}|u\h{4})/ # the letter escapes JS reads without `u`
 
-    # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `[\s\S]`, `\cX` ->
+    # The JS-only spellings a tenant is likely to author: `[^]` (any char) -> `(?m:.)`, `\cX` ->
     # the control character, and the anchors: JS `^`/`$` bind the whole input while Ruby's are
     # line anchors, so outside a class they become `\A`/`\z`; a `{` that is no JS quantifier
     # (`{,3}`, `{ 1}`) -> `\{` (JS reads it as text, Onigmo as a bound), and `x{n}?` -> `x{n}` (JS
@@ -349,8 +349,12 @@ module Camada
     # letter, as JS reads it without `u` (`\p{L}` is "p{L}", `\A` is "A"). `.` -> JS_DOT, `[]` ->
     # `(?!)` (never matches; a `]` right after `[`/`[^` closes the class, a stray `]` -> `\]`), and
     # `\s`/`\S` -> the JS whitespace set; inside a class they nest as a class
-    # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS, fine in a lookbehind), a `-` beside one stays a literal dash, as in JS,
+    # (`[a\s]` -> `[a[WS]]`: one atom, no ReDoS), a `-` beside one stays a literal dash, as in JS,
     # and so does a `-` right after the atom that follows it.
+    # Under IGNORECASE Onigmo folds several chars at once (`ss` ~ ß, and a positive class holding
+    # `\S` gains such folds), which makes a lookbehind variable-length and uncompilable; JS folds one
+    # char at a time. So inside a lookbehind adjacent literals are split with `(?:)` and a positive
+    # class with `\S` becomes `(?:[^WS]|[rest])` (camada-all-ccjo).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
@@ -375,6 +379,10 @@ module Camada
       named = group_names.any?
       opens = [] # the unclosed `(` indices outside a class
       bars = [-1] # per open group, the root first: the index of the last `|` in it or an ancestor
+      lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
+      lit_end = -1 # the pattern index right after the last literal char
+      class_start = 0 # the out index of the open class's `[`
+      class_s = false # the open positive lookbehind class held `\S`
       last_named = {} # name -> the index of its last opener
       while i < n
         ch = pattern[i]
@@ -392,7 +400,11 @@ module Camada
           end
           l = pattern[i + 1]
           if l == "s" || l == "S"
-            out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom, safe in a lookbehind
+            if in_class && l == "S" && lbs.last && out[class_start + 1] != "^"
+              class_s = true # spliced in at the `]`: a positive class holding \S gains multi-char folds
+            else
+              out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
+            end
             pull_end = i + 2 if in_class
             i += 2
             next
@@ -418,6 +430,10 @@ module Camada
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
                  (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
+          if !kept && !in_class && lbs.last
+            out << "(?:)" if lit_end == i
+            lit_end = i + 2
+          end
           out << (kept ? pattern[i, 2] : l)
           i += 2
           next
@@ -425,7 +441,14 @@ module Camada
         if in_class
           if ch == "]"
             in_class = false
-            out << "]"
+            if class_s
+              rest = out[(class_start + 1)..]
+              out.slice!(class_start..)
+              out << (rest.empty? ? JS_SPACE["S"] : "(?:#{JS_SPACE["S"]}|[#{rest}])")
+              class_s = false
+            else
+              out << "]"
+            end
             i += 1
             next
           end
@@ -452,17 +475,24 @@ module Camada
           last_named[nm] = i
           opens << i
           bars << bars.last
+          lbs << lbs.last
           out << m[0]
           i += m[0].length
           next
         elsif ch == "("
+          m = pattern.match(/\G\((?:\?(?:[:=!]|<[=!]))?/, i)
           opens << i
           bars << bars.last
+          lbs << (lbs.last || m[0].end_with?("<=", "<!"))
+          out << m[0]
+          i += m[0].length
+          next
         elsif ch == "|"
           bars[-1] = i
         elsif ch == ")" && opens.any?
           opens.pop
           bars.pop
+          lbs.pop
         elsif ch == "."
           out << JS_DOT
           i += 1
@@ -475,10 +505,11 @@ module Camada
           neg = pattern[i + 1] == "^"
           j = i + (neg ? 2 : 1)
           if pattern[j] == "]"
-            out << (neg ? "[\\s\\S]" : "(?!)")
+            out << (neg ? "(?m:.)" : "(?!)")
             i = j + 1
             next
           end
+          class_start = out.length
           out << pattern[i...j]
           i = j
           in_class = true
@@ -497,6 +528,14 @@ module Camada
           i += m ? m[0].length : 1
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
+        end
+        if !in_class && lbs.last && !"()|*+?".include?(ch)
+          if ch.ord.between?(0x80, 0xBF)
+            lit_end = i + 1 if lit_end == i # a continuation byte extends the literal
+          else
+            out << "(?:)" if lit_end == i # split the run: Onigmo folds `ss` to ß under /i
+            lit_end = i + 1
+          end
         end
         out << ch
         i += 1
