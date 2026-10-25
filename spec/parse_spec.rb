@@ -215,12 +215,12 @@ RSpec.describe Camada::Snapshot do
      '(?:(?<n>a)|(?<n>b))\k<n>', '(?:(?<n>a)|(?<n>b))\1',
      '(b*)+x\1', '(b|)+x\1', '(a?)+x\1', '\1(b*)+x\1', '(?:(b*))+x\1', '(?<m>b*)+x\k<m>', # a plain reference to a repeat that can match empty
      '(\x41?)+x\1', '(é?)+x\1', '([a]?)+x\1', '(a{0,2})+x\1',
-     '((?i:a?))+x\1', '((?i-m:a?))+x\1', '((?-i:a?))+x\1', '((?m:b*))+x\1', # modifier headers are no atoms
-     '(?:(?i:(b*)))+x\1', '(?i:(b*))+x\1', '(?<m>(?i:b*))+x\k<m>',
+     '((?:a?))+x\1', '((?:b*))+x\1', # a group header is no atom
+     '(?:(?:(b*)))+x\1', '(?<m>(?:b*))+x\k<m>',
      '(?:(?<a>b*)\k<a>)+x\k<a>',
      '(b*){2,3}x\1', '(b*){2,}x\1', '(?:(b*){2})+x\1', '(?:((?:b+|(?=x))){2}c?)+x\1',
      '(b*){2}x\1', '(b*){2,2}x\1', '(?:(b*)){3}x\1', '(a*){2}x\1', '(b*){3}x\1',
-     '(?:(?:(b?)b*){2}){2}x\1', '(?:(?:(b*)b*){2}c)+x\1'].each do |pat| # Onigmo exits an exact-count loop on an empty iteration below its minimum
+     '(?:(?:(b?)b*){2}){2}x\1', '(?:(?:((?=^)+\w*)){2}){2}x\1', '(?:(?:(b*)b*){2}c)+x\1'].each do |pat| # Onigmo exits an exact-count loop on an empty iteration below its minimum
       expect(rx.call(pat)).to(be_nil, pat)
     end
     # node's answers (new RegExp("^(?:" + pat + ")$").test(s)): [matching, not matching]
@@ -283,6 +283,15 @@ RSpec.describe Camada::Snapshot do
     ["(?<n-m>a)", "(?<n+1>a)", "(?<\u00b7a>a)", "(?<>a)", "(?<1a>a)", "(?<n>a)(?<n>b)", "(?<n>(?<n>a))",
      "(?:(?<n>a)|b)(?<n>c)", "(?<n>a)|(?<n>b)\\k<n>", "(?:(?<n>a)|(?<n>b))(c)\\2", "(?<n>a)|(?<n>b)\\1",
      "(?<n>a)|(?<n>b)(?<n>c)", "(?:(?<n>a)|(?<n>b))(?<n>c)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+  end
+
+  it "compiles a duplicate name when no real reference exists (camada-all-cwwz)" do
+    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    { '(?<n>a)|(?<n>b)\\\\1' => [["a", "b\\1"], %w[b]], '(?<n>a)|(?<n>b)[\1]' => [["a", "b\x01"], %w[b1 b]] }.each do |pat, (yes, no)|
+      re = rx.call(pat)
+      yes.each { |s| expect(re&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
+      no.each { |s| expect(re&.match?(s)).to(be(false), "#{pat} on #{s.inspect}") }
+    end
   end
 
   it "compiles group names JS accepts, copied verbatim (camada-all-7xyl)" do

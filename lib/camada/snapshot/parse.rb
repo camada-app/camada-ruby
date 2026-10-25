@@ -269,6 +269,8 @@ module Camada
         end
         i += 1
       end
+      return [[], false, {}] if refs.empty? # an escaped backslash or a class `[\1]` is no reference
+
       names = groups.map { |g| g[:name] }
       index = names.each_with_index.reverse_each.to_h # name => first group number - 1
       named = names.any?
