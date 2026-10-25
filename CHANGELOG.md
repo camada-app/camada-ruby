@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- fix (security): snapshot meta `pathsRegex` entries are now tested like a path `matches` rule condition, and inside the request's regex budget shared with the rule walk. They are case-insensitive, a pattern this SDK refuses never matches, and a path over 2048 chars, an engine failure or a spent budget answers block. Previously they ran outside the budget, and a failure was a miss. `Snapshot#paths_regex` is now a list of predicates. (camada-all-rvuh)
 - feat: the first-party beacon relay (/_cam/fp) stamps `rts`, the relay's clock in epoch ms, on the sig:1 row (overwriting any browser-supplied `rts`), so the analyst can place the beacon on the same clock as the request rows. (camada-all-wd3b)
 - fix: a signalled response (`x-camada-challenge: 1`) now also sets `cdn-cache-control`, `surrogate-control`, `cloudflare-cdn-cache-control`, `vercel-cdn-cache-control` and `netlify-cdn-cache-control` to `no-store`, overriding the app's. CDNs read those ahead of `cache-control`, so an app-set one could still let a shared cache keep the per-client copy. (camada-all-1zlg)
 - feat: a non-HTML request under a challenge row passes to the app instead of a 403 JSON `challenge_required`: its response carries `x-camada-challenge: 1` and `cache-control: no-store` (replacing the app's), and its event ships `chs: 1` whatever `sample` and `exclude` say. `serve_challenge` does the same for a non-page request and returns `nil`. (camada-all-7cgs)
