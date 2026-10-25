@@ -806,12 +806,12 @@ module Camada
     # One condition -> a predicate. `sets` yields this rule's (v4, v6) section pair per ip
     # condition, in condition order, so an ip condition consumes the next one.
     def self.compile_cond(c, sets, deny = true)
-      # camada-all-zpbv: a stored `matches` value that is "" or not a String never matches (no to_s
-      # coercion into a regex; "" would match everything). First, so it also beats the over-cap fail-closed.
-      return ->(_r) { false } if c["op"].to_s == "matches" && (!c["v"].is_a?(String) || c["v"].empty?)
-
       f = c["f"].to_s
       op = c["op"].to_s
+      # camada-all-zpbv: a stored `matches` value that is "" or not a String never matches (no to_s
+      # coercion into a regex; "" would match everything). First, so it also beats the over-cap fail-closed.
+      return ->(_r) { false } if op == "matches" && (!c["v"].is_a?(String) || c["v"].empty?)
+
       if f == "path" # every path op reads the canonical forms (see "paths" above)
         raw = c["v"]
         pred = path_pred(op, raw.is_a?(Array) ? raw.map(&:to_s) : [raw.to_s], deny)
