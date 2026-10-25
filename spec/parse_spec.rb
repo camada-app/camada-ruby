@@ -673,6 +673,13 @@ RSpec.describe "Camada::Snapshot matches cap" do
       expect(rx.match?("a y")).to be(false)
     end
 
+    it "keeps an escape in a lookbehind whole" do
+      { "(?<=\\x41)x" => "Ax", "(?<=\\u0041)x" => "Ax", "(?<=a\\101)x" => "aAx" }.each do |pat, v|
+        expect(Camada::Snapshot.compile_regex(pat)&.match?(v)).to be(true), pat
+        expect(ci.call(pat)&.match?(v.swapcase)).to be(true), pat
+      end
+    end
+
     it "still reads [^] as any char" do
       rx = ci.call("^a[^]b$")
       expect(rx.match?("a\nb")).to be(true)
