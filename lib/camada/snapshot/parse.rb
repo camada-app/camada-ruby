@@ -361,7 +361,8 @@ module Camada
     # `\S` gains such folds), which makes a lookbehind variable-length and uncompilable; JS folds one
     # char at a time. So inside a lookbehind adjacent literal chars are split with `(?:)` (`ab` -> `a(?:)b`; a
     # lone literal stays a plain string node, which Onigmo can still expand for a multi-char fold) and a positive
-    # class with `\S` becomes `(?:[^WS]|[rest])` (camada-all-ccjo).
+    # class with `\S` (or `\W`/`\D`) becomes `(?:[^WS]|[rest])`, and a closed one-char class counts as a literal for
+    # that split (camada-all-ccjo, camada-all-fe1r).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
@@ -389,7 +390,7 @@ module Camada
       lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
       lit_end = -1 # the pattern index right after the last literal emitted inside a lookbehind
       class_start = nil # the out index of an open positive class's `[` inside a lookbehind
-      class_s = false # that class held `\S`
+      class_alts = [] # the `\S`/`\W`/`\D` that class held
       last_named = {} # name -> the index of its last opener
       while i < n
         ch = pattern[i]
@@ -406,12 +407,14 @@ module Camada
             next
           end
           l = pattern[i + 1]
+          if in_class && class_start && (l == "S" || l == "W" || l == "D")
+            class_alts << (l == "S" ? JS_SPACE["S"] : "\\#{l}") # spliced in at the `]`: a positive class holding one gains multi-char folds
+            pull_end = i + 2
+            i += 2
+            next
+          end
           if l == "s" || l == "S"
-            if in_class && l == "S" && class_start
-              class_s = true # spliced in at the `]`: a positive class holding \S gains multi-char folds
-            else
-              out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
-            end
+            out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
             pull_end = i + 2 if in_class
             i += 2
             next
@@ -454,19 +457,22 @@ module Camada
         if in_class
           if ch == "]"
             in_class = false
-            if class_s
+            if class_alts.any?
               rest = out.slice!(class_start..)[1..]
               rest = "\\#{rest}" if rest.start_with?("^") # `[^..]` would negate the spliced class
-              out << (rest.empty? ? JS_SPACE["S"] : "(?:#{JS_SPACE["S"]}|[#{rest}])")
-              class_s = false
+              alts = class_alts.join("|")
+              alts = "(?:#{alts}" + (rest.empty? ? ")" : "|[#{rest}])") if class_alts.length > 1 || !rest.empty?
+              out << alts
+              class_alts = []
             else
               out << "]"
             end
+            lit_end = i + 1 if class_start # Onigmo merges a one-char class into the literals beside it
             class_start = nil
             i += 1
             next
           end
-          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
+          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(class_start ? /\G-\\[sSWD]/ : /\G-\\[sS]/, i))
             if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
               m = pattern.match(JS_ATOM, i + 1) # nil when the pattern ends on the dash
               solo_end = m ? i + 1 + m[0].length : pattern.length
@@ -523,7 +529,10 @@ module Camada
             i = j + 1
             next
           end
-          class_start = out.length if !neg && lbs.last
+          if !neg && lbs.last
+            out << "(?:)" if lit_end == i
+            class_start = out.length
+          end
           out << pattern[i...j]
           i = j
           in_class = true
