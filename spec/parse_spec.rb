@@ -285,17 +285,13 @@ RSpec.describe Camada::Snapshot do
      "(?<n>a)|(?<n>b)(?<n>c)", "(?:(?<n>a)|(?<n>b))(?<n>c)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
   end
 
-  it "compiles a duplicate name when no real reference exists (camada-all-cwwz)" do
-    rx = ->(p) { Camada::Snapshot.compile_regex(p) }
-    { '(?<n>a)|(?<n>b)\\\\1' => [["a", "b\\1"], %w[b]], '(?<n>a)|(?<n>b)[\1]' => [["a", "b\x01"], %w[b1 b]] }.each do |pat, (yes, no)|
-      re = rx.call(pat)
-      yes.each { |s| expect(re&.match?(s)).to(be(true), "#{pat} on #{s.inspect}") }
-      no.each { |s| expect(re&.match?(s)).to(be(false), "#{pat} on #{s.inspect}") }
-    end
-  end
-
   it "compiles group names JS accepts, copied verbatim (camada-all-7xyl)" do
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
+    # an escaped backslash or a class `[\1]` is no reference, so the twins compile (camada-all-cwwz)
+    { '(?<n>a)|(?<n>b)\\\\1' => ["b\\1", "b"], '(?<n>a)|(?<n>b)[\1]' => ["b\x01", "b1"] }.each do |pat, (hit, miss)|
+      expect(rx.call(pat)).to match(hit)
+      expect(rx.call(pat)).not_to match(miss)
+    end
     expect(rx.call("(?<\u00e9>a)\\k<\u00e9>")).to match("aa")
     expect(rx.call("(?<$x>a)\\k<$x>")).to match("aa")
     expect(rx.call("(?<$x_\u200c>a)")).to match("a")
