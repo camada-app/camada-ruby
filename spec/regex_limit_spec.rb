@@ -85,7 +85,7 @@ RSpec.describe "regex limit" do
 
   # camada-all-zpbv: a stored `matches` value that is "" or not a String never matches, over the cap or not.
   describe "a non-string matches value" do
-    str = '123 0 1 true {"x"=>1} ["^/a"] [123]' # every coerced spelling of the values appears in the input
+    str = '123 0 1 true {"x"=>1} {"x" => 1} ["^/a"] [123]' # every coerced spelling (Ruby <3.4 and 3.4 Hash#inspect) of the values appears in the input
     big = "a" * (Camada::Snapshot::MAX_MATCH_INPUT + 1)
     blk = { "id" => "cr_blk", "action" => "block", "conds" => [{ "f" => "ip", "op" => "is_not", "v" => "1.1.1.1" }] }
 
@@ -93,18 +93,16 @@ RSpec.describe "regex limit" do
       %w[ua path header].each do |f|
         [false, true].each do |over|
           it "#{v.inspect} on #{f}#{" over the cap" if over}: block never matches, skip does not exempt" do
-            input = lambda do
-              Camada::Snapshot::MatchInput.new(
-                ip: "8.8.8.8",
-                path: over && f == "path" ? "/a/#{str}/#{big}" : "/a/#{str}",
-                ua: over && f == "ua" ? "#{str} #{big}" : str,
-                header: ->(_n) { over && f == "header" ? "#{str} #{big}" : str }
-              )
-            end
+            input = Camada::Snapshot::MatchInput.new(
+              ip: "8.8.8.8",
+              path: over && f == "path" ? "/a/#{str}/#{big}" : "/a/#{str}",
+              ua: over && f == "ua" ? "#{str} #{big}" : str,
+              header: ->(_n) { over && f == "header" ? "#{str} #{big}" : str }
+            )
             cond = { "f" => f, "op" => "matches", "v" => v }
             cond["name"] = "x-h" if f == "header"
-            expect(matcher([{ "id" => "cr_b", "action" => "block", "conds" => [cond] }]).match(input.call).block).to be(false)
-            r = matcher([{ "id" => "cr_s", "action" => "skip", "conds" => [cond] }, blk]).match(input.call)
+            expect(matcher([{ "id" => "cr_b", "action" => "block", "conds" => [cond] }]).match(input).block).to be(false)
+            r = matcher([{ "id" => "cr_s", "action" => "skip", "conds" => [cond] }, blk]).match(input)
             expect(r.rule).to eq("cr_blk")
           end
         end
