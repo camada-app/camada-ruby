@@ -86,10 +86,10 @@ RSpec.describe Camada::Snapshot do
       expect(%w[/a /aa /b].map { |p| m.match(input(path: p)).block }).to eq([false, false, false])
     end
 
-    it "blocks a path over the 2048 cap, not one at it" do
+    it "blocks a path over the cap, not one at it" do
       m = meta_matcher(["^/never$"])
-      expect(m.match(input(path: "/#{"a" * 2048}")).reason).to eq("path")
-      expect(m.match(input(path: "/#{"a" * 2047}")).block).to be(false)
+      expect(m.match(input(path: "/#{"a" * Camada::Snapshot::MAX_MATCH_INPUT}")).reason).to eq("path")
+      expect(m.match(input(path: "/#{"a" * (Camada::Snapshot::MAX_MATCH_INPUT - 1)}")).block).to be(false)
     end
 
     it "runs inside the budget shared with the rule walk" do
