@@ -354,7 +354,8 @@ module Camada
     # and so does a `-` right after the atom that follows it.
     # Under IGNORECASE Onigmo folds several chars at once (`ss` ~ ß, and a positive class holding
     # `\S` gains such folds), which makes a lookbehind variable-length and uncompilable; JS folds one
-    # char at a time. So inside a lookbehind each literal char starts with `(?:)` and a positive
+    # char at a time. So inside a lookbehind adjacent literal chars are split with `(?:)` (`ab` -> `a(?:)b`; a
+    # lone literal stays a plain string node, which Onigmo can still expand for a multi-char fold) and a positive
     # class with `\S` becomes `(?:[^WS]|[rest])` (camada-all-ccjo).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
@@ -381,6 +382,7 @@ module Camada
       opens = [] # the unclosed `(` indices outside a class
       bars = [-1] # per open group, the root first: the index of the last `|` in it or an ancestor
       lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
+      lit_end = -1 # the pattern index right after the last literal emitted inside a lookbehind
       class_start = nil # the out index of an open positive class's `[` inside a lookbehind
       class_s = false # that class held `\S`
       last_named = {} # name -> the index of its last opener
@@ -436,7 +438,10 @@ module Camada
             i += e.length
             next
           end
-          out << "(?:)" if !in_class && lbs.last # a bare letter is a literal
+          if !in_class && lbs.last # a bare letter is a literal (2 long): split it from a literal just before
+            out << "(?:)" if lit_end == i
+            lit_end = i + 2
+          end
           out << l
           i += 2
           next
@@ -533,8 +538,15 @@ module Camada
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
         end
-        # a literal in a lookbehind starts with `(?:)` (never inside a UTF-8 char): Onigmo folds `ss` to ß under /i
-        out << "(?:)" if !in_class && lbs.last && !"()|*+?".include?(ch) && !ch.ord.between?(0x80, 0xBF)
+        # a literal in a lookbehind directly after another gets `(?:)` (never inside a UTF-8 char): Onigmo folds `ss` to ß under /i
+        if !in_class && lbs.last && !"()|*+?".include?(ch)
+          if ch.ord.between?(0x80, 0xBF)
+            lit_end = i + 1 if lit_end == i
+          else
+            out << "(?:)" if lit_end == i
+            lit_end = i + 1
+          end
+        end
         out << ch
         i += 1
       end
