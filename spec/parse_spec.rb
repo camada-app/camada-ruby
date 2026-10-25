@@ -635,4 +635,48 @@ RSpec.describe "Camada::Snapshot matches cap" do
     end
     expect(Camada::Snapshot.compile_regex("[\\s\\t]x")).to match("\tx")
   end
+
+  # camada-all-ccjo: Onigmo's multi-char case folds must not make a lookbehind variable-length under /i
+  context "lookbehinds under IGNORECASE" do
+    let(:ci) { ->(p) { Camada::Snapshot.compile_regex(p, Regexp::IGNORECASE) } }
+
+    it "compiles a lookbehind holding [\\s\\S] or a dot and matches like JS" do
+      rx = ci.call("(?<=a[\\s\\S])x")
+      expect(rx).not_to be_nil
+      expect(rx.match?("a\nx")).to be(true)
+      expect(rx.match?("a\u00e9x")).to be(true)
+      rx = ci.call("(?<=(?:ss|k.))x")
+      expect(rx).not_to be_nil
+      %W[ssx k\u00e9x KAx SSx].each { |v| expect(rx.match?(v)).to be(true), v }
+      %W[k\nx ßx].each { |v| expect(rx.match?(v)).to be(false), v }
+      rx = ci.call("(?<=z(?:[\\s\\S]|e))x")
+      expect(rx).not_to be_nil
+      ["z x", "zEx"].each { |v| expect(rx.match?(v)).to be(true), v }
+    end
+
+    it "does not raise on a non-ASCII value for a literal run" do
+      { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
+        rx = ci.call(pat)
+        vals.each { |v| expect(Camada::Snapshot.regex_hit?(rx, v, :err)).to be(true), v }
+      end
+      expect(ci.call("(?<=ss)x").match?("\u00dfx")).to be(false)
+    end
+
+    it "keeps a positive class with \\S and other members, and a dash, like JS" do
+      rx = ci.call("(?<=a[x\\S])y")
+      expect(rx).not_to be_nil
+      %w[axy aéy aQy].each { |v| expect(rx.match?(v)).to be(true), v }
+      expect(rx.match?("a y")).to be(false)
+      rx = ci.call("(?<=a[\\S-x])y")
+      expect(rx).not_to be_nil
+      %w[a-y axy ayy].each { |v| expect(rx.match?(v)).to be(true), v }
+      expect(rx.match?("a y")).to be(false)
+    end
+
+    it "still reads [^] as any char" do
+      rx = ci.call("^a[^]b$")
+      expect(rx.match?("a\nb")).to be(true)
+      expect(ci.call("(?<=[^])x").match?("\nx")).to be(true)
+    end
+  end
 end
