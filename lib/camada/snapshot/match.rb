@@ -60,7 +60,12 @@ module Camada
         @snap = snap
       end
 
-      def match(i)
+      # The whole decision (rules, allow, block, challenge) runs in one request regex budget.
+      def match(i) = Snapshot.with_regex_budget { decide(i) }
+
+      private
+
+      def decide(i)
         s = @snap
         ip = i.ip || ""
         n4 = -1
@@ -76,9 +81,7 @@ module Camada
         unless s.rules.empty?
           r = RuleRequest.new(n4: n4, ip6: w, asn: i.asn, country: i.country, tlsx: i.tlsx,
                               paths: forms, ua: i.ua, header: i.header)
-          hit = Snapshot.with_regex_budget do
-            s.rules.find { |rule| rule.conds.all? { |cond| cond.call(r) } } # the order IS the precedence (§A4): first match wins
-          end
+          hit = s.rules.find { |rule| rule.conds.all? { |cond| cond.call(r) } } # the order IS the precedence (§A4): first match wins
           return Snapshot.rule_result(hit, s.version) if hit
         end
         reason = side(s.allow, i, n4, w, forms, false) # an exemption: every canonical spelling must agree
@@ -92,8 +95,6 @@ module Camada
 
         MatchResult.new(version: s.version)
       end
-
-      private
 
       def blocked4?(n)
         s = @snap

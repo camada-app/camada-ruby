@@ -70,6 +70,40 @@ RSpec.describe Camada::Snapshot do
     expect(m2.match(input(path: "/dump")).reason).to eq("path")
   end
 
+  describe "meta pathsRegex" do
+    def meta_matcher(rx, rules = [])
+      Camada::Snapshot::Matcher.new(described_class.parse_snapshot(container(0x424C4B35, []), { "version" => "v", "pathsRegex" => rx, "rules" => rules }))
+    end
+
+    it "is case-insensitive like a path matches condition" do
+      m = meta_matcher(["^/DUMP$"])
+      expect(m.match(input(path: "/dump")).reason).to eq("path")
+      expect(m.match(input(path: "/dumpx")).block).to be(false)
+    end
+
+    it "never matches a pattern this SDK refuses" do
+      m = meta_matcher(["(?>a)", "(?<=a"])
+      expect(%w[/a /aa /b].map { |p| m.match(input(path: p)).block }).to eq([false, false, false])
+    end
+
+    it "blocks a path over the 2048 cap, not one at it" do
+      m = meta_matcher(["^/never$"])
+      expect(m.match(input(path: "/#{"a" * 2048}")).reason).to eq("path")
+      expect(m.match(input(path: "/#{"a" * 2047}")).block).to be(false)
+    end
+
+    it "runs inside the budget shared with the rule walk" do
+      rule = { "id" => "h", "action" => "block", "conds" => [{ "f" => "header", "op" => "is", "name" => "x-spend", "v" => "never" }] }
+      m = meta_matcher(["^/never$"], [rule])
+      spend = lambda { |_n|
+        Thread.current[:camada_regex_budget] = 0
+        nil
+      }
+      expect(m.match(input(path: "/x", header: spend)).reason).to eq("path")
+      expect(m.match(input(path: "/x", header: ->(_n) {})).block).to be(false)
+    end
+  end
+
   it "compares asn conditions as strings and never fires an unanswerable field" do
     m = rules_snapshot([
                          { "id" => "asn", "action" => "block", "conds" => [{ "f" => "asn", "op" => "is_in", "v" => [14_061, "7922"] }] },
