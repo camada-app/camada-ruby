@@ -217,7 +217,7 @@ module Camada
         ch = pattern[i]
         if ch == "\\"
           if in_class
-            nil
+            refs << [i, :bad, cur, i + 2] if pattern[i + 1] == "k" # `[\k]` is a SyntaxError beside named groups
           elsif (m = pattern.match(/\G(?:k<([^<>]*)>|([1-9][0-9]*)|(k))/, i + 1))
             refs << [i, m[3] ? :bad : m[1] || m[2].to_i, cur, m.end(0)]
             i = m.end(0) - 2 # the reference is no atom: skip its name or digits (the loop's step and the one below)
