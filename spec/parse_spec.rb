@@ -282,7 +282,8 @@ RSpec.describe Camada::Snapshot do
   it "fails open on a group name JS rejects or a duplicate that could both participate (camada-all-7xyl)" do
     ["(?<n-m>a)", "(?<n+1>a)", "(?<\u00b7a>a)", "(?<>a)", "(?<1a>a)", "(?<n>a)(?<n>b)", "(?<n>(?<n>a))",
      "(?:(?<n>a)|b)(?<n>c)", "(?<n>a)|(?<n>b)\\k<n>", "(?:(?<n>a)|(?<n>b))(c)\\2", "(?<n>a)|(?<n>b)\\1",
-     "(?<n>a)|(?<n>b)(?<n>c)", "(?:(?<n>a)|(?<n>b))(?<n>c)"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
+     "(?<n>a)|(?<n>b)(?<n>c)", "(?:(?<n>a)|(?<n>b))(?<n>c)",
+     "(?<n>a)[\\k]", "(?<n>a)[\\k<n>]", "(?<n>a)[\\k<m>]", "(?<n>a)|(?<n>b)[\\k<n>]"].each { |pat| expect(Camada::Snapshot.compile_regex(pat)).to be_nil, pat }
   end
 
   it "compiles group names JS accepts, copied verbatim (camada-all-7xyl)" do
@@ -292,6 +293,7 @@ RSpec.describe Camada::Snapshot do
       expect(rx.call(pat)).to match(hit)
       expect(rx.call(pat)).not_to match(miss)
     end
+    expect(rx.call("[\\k]")).to match("k")
     expect(rx.call("(?<\u00e9>a)\\k<\u00e9>")).to match("aa")
     expect(rx.call("(?<$x>a)\\k<$x>")).to match("aa")
     expect(rx.call("(?<$x_\u200c>a)")).to match("a")
