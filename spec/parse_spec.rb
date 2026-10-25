@@ -662,6 +662,19 @@ RSpec.describe "Camada::Snapshot matches cap" do
       expect(ci.call("(?<=ss)x").match?("\u00dfx")).to be(false)
     end
 
+    it "escapes a caret after a leading \\S and keeps a digit escape whole" do
+      [0, Regexp::IGNORECASE].each do |f|
+        rx = Camada::Snapshot.compile_regex("(?<=[\\S^a])x", f)
+        expect(rx).not_to be_nil
+        expect(rx.match?(" x")).to be(false)
+        %w[^x bx].each { |v| expect(rx.match?(v)).to be(true), v }
+        rx = Camada::Snapshot.compile_regex("(?<=[\\S^])x", f)
+        expect(rx).not_to be_nil
+        expect(rx.match?("^x")).to be(true)
+      end
+      expect(Camada::Snapshot.js_to_onigmo("(?<=\\81)y")).to include("\\81")
+    end
+
     it "keeps a positive class with \\S and other members, and a dash, like JS" do
       rx = ci.call("(?<=a[x\\S])y")
       expect(rx).not_to be_nil

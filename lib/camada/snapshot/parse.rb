@@ -431,7 +431,7 @@ module Camada
                  (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           if kept
-            e = pattern.match(JS_ATOM, i)[0] # the whole escape: a lookbehind must not split `\x41`
+            e = (pattern.match(/\G\\\d+/n, i) || pattern.match(JS_ATOM, i))[0] # the whole escape: a lookbehind must not split `\x41`
             out << e
             i += e.length
             next
@@ -446,6 +446,7 @@ module Camada
             in_class = false
             if class_s
               rest = out.slice!(class_start..)[1..]
+              rest = "\\#{rest}" if rest.start_with?("^") # `[^..]` would negate the spliced class
               out << (rest.empty? ? JS_SPACE["S"] : "(?:#{JS_SPACE["S"]}|[#{rest}])")
               class_s = false
             else
