@@ -654,6 +654,13 @@ RSpec.describe "Camada::Snapshot matches cap" do
       ["z x", "zEx"].each { |v| expect(rx.match?(v)).to be(true), v }
     end
 
+    it "keeps a lone multi-char-fold literal a plain string and splits only adjacent literals" do
+      ["(?<=\ufb00)x", "(?<=\u01f0)x", "(?<!\ufb00)x"].each { |p| expect(ci.call(p)).not_to be_nil, p }
+      expect(ci.call("(?<=\ufb00)x").match?("\ufb00x")).to be(true)
+      expect(Camada::Snapshot.js_to_onigmo("(?<=ab)x")).to include("a(?:)b")
+      expect(Camada::Snapshot.js_to_onigmo("(?<=a)x")).to eq("(?<=a)x")
+    end
+
     it "does not raise on a non-ASCII value for a literal run" do
       { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
         rx = ci.call(pat)
