@@ -153,11 +153,12 @@ module Camada
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo). Onigmo also diverges from JS on a
     # repeated capture group whose body can match empty, even with no backreference: `((x?[ab]*)+?[ab]){2}` on 'aa'
-    # matches in JS, not here (an accepted gap, camada-all-mx0s). Under IGNORECASE, outside a lookbehind, Onigmo also applies
+    # matches in JS, not here (an accepted gap, camada-all-mx0s). Under IGNORECASE Onigmo also applies
     # multi-char case folds JS /i (one char at a time) does not: `\A(?:ss)\z` matches "ß", `[ß]` and `[a\S]` match "SS", `ff` matches
     # "ﬀ", and an ASCII-only pattern does the same once Ruby recompiles it for a non-ASCII value. Extra matches only, so a rule hits a
     # value JS would not and never misses one; splitting every literal run would slow string search (an accepted gap, camada-all-wdii).
-    # Lookbehinds are the exception, they must stay fixed-length (js_to_onigmo, camada-all-ccjo).
+    # Inside a lookbehind js_to_onigmo splits adjacent literals (camada-all-ccjo) so it stays fixed-length, which stops ss folding to ß,
+    # but a lone ß or ﬀ there still matches "SS" / "FF".
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
     # A `(?` or `(*` group JS lacks (`(?i)`, `(?>`, `(*FAIL)`, ...) fails open too: JS rejects it or V8 mis-evaluates it (camada-all-lsl8).
     # Only a UTF-8 or ASCII pattern is walked: snapshot patterns arrive as UTF-8 JSON, and the binary walk
