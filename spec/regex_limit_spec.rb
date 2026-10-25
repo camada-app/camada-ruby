@@ -54,7 +54,7 @@ RSpec.describe "regex limit" do
   %w[refused accepted_match].each do |key|
     vectors[key].each do |row|
       it "#{row["id"]}: #{row["kind"]} runs natively" do
-        rule = vectors["refused_rule"].merge("conds" => [{ "f" => "ua", "op" => "matches", "v" => row["pattern"] }])
+        rule = vectors["refused_rule"].merge("conds" => [{ "f" => vectors["refused_rule"]["field"], "op" => "matches", "v" => row["pattern"] }])
         row["cases"].each do |c|
           expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
         end
