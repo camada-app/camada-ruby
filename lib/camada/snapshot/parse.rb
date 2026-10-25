@@ -356,7 +356,8 @@ module Camada
     # `\S` gains such folds), which makes a lookbehind variable-length and uncompilable; JS folds one
     # char at a time. So inside a lookbehind adjacent literal chars are split with `(?:)` (`ab` -> `a(?:)b`; a
     # lone literal stays a plain string node, which Onigmo can still expand for a multi-char fold) and a positive
-    # class with `\S` becomes `(?:[^WS]|[rest])` (camada-all-ccjo).
+    # class with `\S` (or `\W`/`\D`) becomes `(?:[^WS]|[rest])`, and a closed one-char class counts as a literal for
+    # that split (camada-all-ccjo, camada-all-fe1r).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
@@ -403,7 +404,7 @@ module Camada
           l = pattern[i + 1]
           if in_class && class_start && (l == "S" || l == "W" || l == "D")
             class_alts << (l == "S" ? JS_SPACE["S"] : "\\#{l}") # spliced in at the `]`: a positive class holding one gains multi-char folds
-            pull_end = i + 2 if l == "S"
+            pull_end = i + 2
             i += 2
             next
           end
@@ -466,7 +467,7 @@ module Camada
             i += 1
             next
           end
-          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(/\G-\\[sS]/, i))
+          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(class_start ? /\G-\\[sSWD]/ : /\G-\\[sS]/, i))
             if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
               m = pattern.match(JS_ATOM, i + 1) # nil when the pattern ends on the dash
               solo_end = m ? i + 1 + m[0].length : pattern.length
