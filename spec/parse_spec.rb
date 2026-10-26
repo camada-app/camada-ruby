@@ -794,4 +794,24 @@ RSpec.describe "Camada::Snapshot.path_hit?" do
     expect(Camada::Snapshot.compile_regex("x(?:😀)?y").match?("xy")).to be(true)
     expect(Camada::Snapshot.compile_regex("x😀{y").match?("x😀{y")).to be(true)
   end
+
+  # a zero count is the high unit alone in V8: the position stops mid-char (camada-all-5lra)
+  [
+    ["x😀{0}", "x😀", true], ["x😀{0}.y", "x😀y", true], ["x😀{0}y", "x😀y", false], ["x😀{0}y", "xy", false],
+    ["x😀?", "x😁", true], ["x😀?.", "x😁", true], ["x😀?y", "xy", false], ["x😀{0,1}..", "x😁a", true],
+    ["x\\😀?y", "xy", false], ["x\\😀?y", "x😀y", true], ["x\\😀{0}", "x😀", true], ["x\\😀y", "x😀y", true]
+  ].each do |pattern, text, hit|
+    it "reads #{pattern} on #{text.inspect} as V8 does" do
+      expect(Camada::Snapshot.compile_regex(pattern).match?(text)).to be(hit)
+    end
+  end
+
+  it "drops the zero-count alternative inside a lookbehind" do
+    rx = Camada::Snapshot.compile_regex("(?<=a😀?)b")
+    expect([rx.match?("a😀b"), rx.match?("ab")]).to eq([true, false])
+  end
+
+  it "leaves an m > n count after an astral char as written (a SyntaxError)" do
+    expect(Camada::Snapshot.compile_regex("x😀{3,2}")).to be_nil
+  end
 end
