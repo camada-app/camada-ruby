@@ -780,4 +780,47 @@ RSpec.describe "Camada::Snapshot.path_hit?" do
     expect(count(distinct, false, %w[/b /c])).to eq([true, 2])
     expect(count(%w[/a /b /b], true)).to eq([false, 2])
   end
+
+  # V8 repeats only the low unit of an astral char: x😀y hits when the count allows 1; xy and x😀😀y never (camada-all-5lra)
+  astral_once = %w[? * + ?? *? +? {1} {01} {0,1} {0,2} {1,} {1}?]
+  (astral_once + %w[{0} {2} {2,} {2,3}]).each do |q|
+    it "reads x😀#{q}y as V8 does" do
+      rx = Camada::Snapshot.compile_regex("x😀#{q}y")
+      expect(["xy", "x😀y", "x😀😀y"].map { |u| rx.match?(u) }).to eq([false, astral_once.include?(q), false])
+    end
+  end
+
+  it "keeps a group whole and a non-quantifier brace literal after an astral char" do
+    expect(Camada::Snapshot.compile_regex("x(?:😀)?y").match?("xy")).to be(true)
+    expect(Camada::Snapshot.compile_regex("x😀{y").match?("x😀{y")).to be(true)
+  end
+
+  # V8 repeats only the low unit; the zero-low reading (high unit alone) is not emulated, so these miss (camada-all-5lra)
+  [
+    ["x😀{0}", "x😀", false], ["x😀{0}.y", "x😀y", false], ["x😀?", "x😁", false], ["x😀?.", "x😁", false],
+    ["x😀{0,1}..", "x😁a", false], ["x\\😀{0}", "x😀", false], ["x😀?😁", "x😁", false], ["x😀?\\b", "x😀", false],
+    ["x😀?(?<=x)", "x😀", false]
+  ].each do |pattern, text, hit|
+    it "does not emulate V8's zero-low reading of #{pattern} on #{text.inspect}" do
+      expect(Camada::Snapshot.compile_regex(pattern).match?(text)).to be(hit)
+    end
+  end
+
+  [
+    ["x😀{0}y", "x😀y", false], ["x😀{0}y", "xy", false], ["x😀?y", "xy", false],
+    ["x\\😀?y", "xy", false], ["x\\😀?y", "x😀y", true], ["x\\😀y", "x😀y", true]
+  ].each do |pattern, text, hit|
+    it "reads #{pattern} on #{text.inspect} as V8 does" do
+      expect(Camada::Snapshot.compile_regex(pattern).match?(text)).to be(hit)
+    end
+  end
+
+  it "keeps a one-count astral char in a lookbehind" do
+    rx = Camada::Snapshot.compile_regex("(?<=a😀?)b")
+    expect([rx.match?("a😀b"), rx.match?("ab")]).to eq([true, false])
+  end
+
+  it "leaves an m > n count after an astral char as written (a SyntaxError)" do
+    expect(Camada::Snapshot.compile_regex("x😀{3,2}")).to be_nil
+  end
 end
