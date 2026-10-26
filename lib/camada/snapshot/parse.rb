@@ -163,7 +163,8 @@ module Camada
     # "ﬀ", and an ASCII-only pattern does the same once Ruby recompiles it for a non-ASCII value. Extra matches only, so a rule hits a
     # value JS would not and never misses one; splitting every literal run would slow string search (an accepted gap, camada-all-wdii).
     # Inside a lookbehind js_to_onigmo splits adjacent literals (camada-all-ccjo) so it stays fixed-length, which stops ss folding to ß,
-    # but a lone ß or ﬀ there still matches "SS" / "FF".
+    # and reads a multi-fold char (ß, ﬀ, İ) case-sensitively, as JS matches it: Onigmo there reads it as its fold alone (ß as "ss",
+    # never "ß"; Ruby 3.3.13 and 3.4.12 do the same for ﬀ and İ, camada-all-ozix).
     # A backreference JS and Onigmo read differently is rewritten or, when it cannot be, fails open (scan_groups).
     # A `(?` or `(*` group JS lacks (`(?i)`, `(?>`, `(*FAIL)`, ...) fails open too: JS rejects it or V8 mis-evaluates it (camada-all-lsl8).
     # Only a UTF-8 or ASCII pattern is walked: snapshot patterns arrive as UTF-8 JSON, and the binary walk
@@ -366,9 +367,11 @@ module Camada
     # Under IGNORECASE Onigmo folds several chars at once (`ss` ~ ß, and a positive class holding
     # `\S` gains such folds), which makes a lookbehind variable-length and uncompilable; JS folds one
     # char at a time. So inside a lookbehind adjacent literal chars are split with `(?:)` (`ab` -> `a(?:)b`; a
-    # lone literal stays a plain string node, which Onigmo can still expand for a multi-char fold) and a positive
+    # lone literal stays a plain string node) and a positive
     # class with `\S` (or `\W`/`\D`) becomes `(?:[^WS]|[rest])`, and a closed one-char class counts as a literal for
-    # that split (camada-all-ccjo, camada-all-fe1r).
+    # that split (camada-all-ccjo, camada-all-fe1r). A char whose fold is several chars (ß, ﬀ, İ; raw, `\u00df` or `\ß`)
+    # becomes `(?-i:ß)` there, pulled out of a positive class like `\S` unless a `-` is beside it (camada-all-ozix):
+    # JS /i matches it only to itself, and Onigmo would read it as its fold alone (version-dependent).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
@@ -396,10 +399,17 @@ module Camada
       lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
       lit_end = -1 # the pattern index right after the last literal emitted inside a lookbehind
       class_start = nil # the out index of an open positive class's `[` inside a lookbehind
-      class_alts = [] # the `\S`/`\W`/`\D` that class held
+      class_alts = [] # the `\S`/`\W`/`\D` and multi-fold chars that class held
       last_named = {} # name -> the index of its last opener
       while i < n
         ch = pattern[i]
+        # in a lookbehind (positive class too, unless a range end) a multi-fold char becomes `(?-i:c)` (camada-all-ozix)
+        if lbs.last && (!in_class || class_start) && (w = multi_fold(pattern, i)) &&
+           !(in_class && (pattern[i - 1] == "-" || pattern[i + w[1]] == "-"))
+          in_class ? class_alts << "(?-i:#{w[0]})" : out << "(?-i:#{w[0]})"
+          i += w[1]
+          next
+        end
         if ch == "\\" && i + 1 < n
           if !in_class && (r = plan[i])
             if r[1] == :empty
@@ -612,6 +622,27 @@ module Camada
 
     def self.binary(str)
       str.encoding == Encoding::BINARY ? str : str.b
+    end
+
+    # [its text, its length] when the char at i (raw UTF-8, `\uXXXX` or an identity escape `\ß`) has a case fold of
+    # several chars (ß, İ, ﬀ: 104 of them), else nil. JS /i without `u` matches each of them only to itself.
+    def self.multi_fold(pattern, i)
+      if pattern[i] == "\\"
+        return (w = multi_fold(pattern, i + 1)) && [w[0], w[1] + 1] if pattern.getbyte(i + 1).to_i >= 0x80
+
+        m = pattern.match(/\G\\u(\h{4})/n, i)
+        return nil unless m && !(cp = m[1].hex).between?(0xD800, 0xDFFF)
+
+        c = cp.chr(Encoding::UTF_8)
+        len = 6
+      else
+        b = pattern.getbyte(i)
+        return nil unless b.between?(0xC2, 0xEF) # a 2- or 3-byte lead: every such char is in the BMP
+
+        len = b < 0xE0 ? 2 : 3
+        c = pattern.byteslice(i, len).force_encoding(Encoding::UTF_8)
+      end
+      [pattern.byteslice(i, len), len] if c.valid_encoding? && c.downcase(:fold).length > 1
     end
 
     def self.brace_quantifier(match)

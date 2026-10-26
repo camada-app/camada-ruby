@@ -688,11 +688,36 @@ RSpec.describe "Camada::Snapshot matches cap" do
       ["z x", "zEx"].each { |v| expect(rx.match?(v)).to be(true), v }
     end
 
-    it "keeps a lone multi-char-fold literal a plain string and splits only adjacent literals" do
+    it "compiles a lone multi-char-fold literal and splits only adjacent literals" do
       ["(?<=\ufb00)x", "(?<=\u01f0)x", "(?<!\ufb00)x"].each { |p| expect(ci.call(p)).not_to be_nil, p }
       expect(ci.call("(?<=\ufb00)x").match?("\ufb00x")).to be(true)
       expect(Camada::Snapshot.js_to_onigmo("(?<=ab)x")).to include("a(?:)b")
       expect(Camada::Snapshot.js_to_onigmo("(?<=a)x")).to eq("(?<=a)x")
+    end
+
+    # camada-all-ozix: Onigmo reads ß (and, on Ruby 3.3.13+/3.4.12+, ﬀ and İ) in a lookbehind as its fold alone; JS matches it only to itself
+    it "matches a multi-char-fold char in a lookbehind only to itself, as JS does" do
+      {
+        "(?<=\u00df)x" => [%W[\u00dfx a\u00dfx], %w[ssx SSx]],
+        "(?<=\\u00df)x" => [%W[\u00dfx], %w[ssx]],
+        "(?<=\\\u00df)x" => [%W[\u00dfx], %w[ssx]],
+        "(?<=\ufb00)x" => [%W[\ufb00x], %w[ffx FFx]],
+        "(?<=\u0130)x" => [%W[\u0130x], %w[ix Ix]],
+        "(?<=a\ufb00)x" => [%W[a\ufb00x A\ufb00x], %w[affx]],
+        "(?<=\ufb00a)x" => [%W[\ufb00Ax], %w[ffax]],
+        "(?<=(?:\ufb00|a))x" => [%W[\ufb00x Ax], %w[ffx]],
+        "(?<=a(?:\u00df|b))x" => [%W[a\u00dfx aBx], %w[assx]],
+        "(?<=[\u00df])x" => [%W[\u00dfx], %w[ssx]],
+        "(?<=[\u00dfa])x" => [%W[\u00dfx Ax], %w[ssx]],
+        "(?<=[\u00df\\S]b)x" => [%W[\u00dfbx abx ssbx], [" bx"]],
+        "(?<!\ufb00)x" => [%w[ffx x], %W[\ufb00x]]
+      }.each do |pat, (hits, misses)|
+        rx = ci.call(pat)
+        expect(rx).not_to be_nil, pat
+        hits.each { |v| expect(rx.match?(v)).to be(true), "#{pat} #{v}" }
+        misses.each { |v| expect(rx.match?(v)).to be(false), "#{pat} #{v}" }
+      end
+      expect(Camada::Snapshot.js_to_onigmo("(?<=[a-\u00df])x")).to eq("(?<=[a-\u00df])x") # a range end stays
     end
 
     it "does not raise on a non-ASCII value for a literal run" do
