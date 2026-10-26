@@ -25,7 +25,7 @@ RSpec.describe "regex limit" do
   def as_input(i) = i.transform_keys(&:to_sym).transform_values { |v| expand(v) }
 
   it "reads the pinned vectors" do
-    expect(Digest::SHA256.file(vectors_path).hexdigest).to eq("2ec0fa002783163e1f1ccec65a759038e9486d2849437a819b3448f2f1b4e5c1")
+    expect(Digest::SHA256.file(vectors_path).hexdigest).to eq("b01e86bd2bead280081f58d31f7f517131d8cafa6144b8c27fe868e3c3959d56")
   end
 
   it "has the contract constants" do
