@@ -153,7 +153,8 @@ module Camada
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
     # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     # A quantifier right after a raw astral char repeats the whole char here but only its low unit in JS,
-    # so js_to_onigmo answers as V8 does: the char alone when the count allows 1, else `(?!)` (camada-all-5lra).
+    # so js_to_onigmo answers as V8 does: the char when the count allows 1, plus a lookahead for its high-surrogate
+    # block when it allows 0, else `(?!)` (camada-all-5lra, see astral_quantified).
     # Onigmo also diverges from JS on a
     # repeated capture group whose body can match empty, even with no backreference: `((x?[ab]*)+?[ab]){2}` on 'aa'
     # matches in JS, not here (an accepted gap, camada-all-mx0s). Under IGNORECASE Onigmo also applies
@@ -441,6 +442,10 @@ module Camada
             i += m[0].length
             next
           end
+          if !in_class && l.ord >= 0xF0 && pattern.match?(JS_QUANT, i + 5) # `\😀?` reads as `😀?` (camada-all-5lra)
+            i += 1
+            next
+          end
           kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
                  (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
@@ -556,13 +561,14 @@ module Camada
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
         end
-        if !in_class && ch.ord >= 0xF0 && (q = pattern.match(JS_QUANT, i + 4)) && !(count = astral_count(q)).nil?
-          if count && lbs.last # the char alone is a literal
+        if !in_class && ch.ord >= 0xF0 && (rewrite = astral_quantified(pattern, i, lbs.last))
+          text, stop, once = rewrite
+          if once && lbs.last # the char alone is a literal
             out << "(?:)" if lit_end == i
-            lit_end = q.end(0)
+            lit_end = stop
           end
-          out << (count ? pattern[i, 4] : "(?!)")
-          i = q.end(0)
+          out << text
+          i = stop
           next
         end
         # a literal in a lookbehind directly after another gets `(?:)` (never inside a UTF-8 char): Onigmo folds `ss` to ß under /i
@@ -580,14 +586,29 @@ module Camada
       out.force_encoding(enc)
     end
 
-    # V8 repeats only the low unit of an astral char: true when the quantifier allows one, false when not, nil when m > n (left as written)
-    def self.astral_count(match)
-      sym, lo, comma, hi = match.captures
+    # V8 without `u` reads an astral char as its high unit H then its low unit L, and a quantifier after it repeats only L.
+    # On well-formed text that is H plus 0 or 1 L: 1 L eats the whole char (when the count allows 1); 0 L stops mid-char,
+    # which a code-point engine reads as a lookahead for any char sharing H. Returns [rewrite, end, whole char kept] for the
+    # astral char at i and the quantifier after it, nil when none or m > n (left as written). A lookbehind cannot hold the
+    # lookahead (or `(?!)`) beside the char, so there the zero-count alternative drops (camada-all-5lra).
+    def self.astral_quantified(pattern, i, in_lookbehind)
+      return unless (q = pattern.match(JS_QUANT, i + 4))
+
+      sym, lo, comma, hi = q.captures
       lo, hi = { "?" => %w[0 1], "*" => ["0", nil], "+" => ["1", nil] }[sym] || [lo, comma ? hi : lo]
       lo, hi = canonical_bounds(lo, hi)
-      return nil unless lo # m > n
+      return unless lo # m > n
 
-      !over_one?(lo) && hi != "0"
+      ch = pattern[i, 4]
+      once = !over_one?(lo) && hi != "0"
+      alts = once ? [ch] : []
+      if lo == "0" && !in_lookbehind
+        base = ch.dup.force_encoding(Encoding::UTF_8).ord & ~0x3FF
+        alts << "(?=[#{[base].pack("U")}-#{[base + 0x3FF].pack("U")}])".b
+      end
+      return ["(?!)", q.end(0), once] if alts.empty?
+
+      [alts.one? ? alts.first : "(?:#{alts.join("|")})".b, q.end(0), once]
     end
 
     # [lo, hi] without leading zeros (hi "" is no upper bound), or nil when m > n: a JS SyntaxError, left as written
