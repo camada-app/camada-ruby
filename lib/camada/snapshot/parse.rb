@@ -334,8 +334,8 @@ module Camada
       !b.nil? && b[1].delete("0").empty?
     end
 
-    JS_QUANT = /\G(?:([?*+])|\{([0-9]+)(?:(,)([0-9]*))?\})\??/ # a JS quantifier with its lazy `?`
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
+    JS_QUANT = /\G(?:([?*+])|#{JS_BRACE.source.delete_prefix('\\G')})\??/ # a JS quantifier with its lazy `?`
     ONIGMO_REPEAT_MAX = 100_000 # Onigmo rejects a repeat number above this ("too big number for repeat range")
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
     JS_SPACE = { "s" => "[#{JS_WS}]", "S" => "[^#{JS_WS}]" }.freeze
@@ -584,10 +584,16 @@ module Camada
     def self.astral_count(match)
       sym, lo, comma, hi = match.captures
       lo, hi = { "?" => %w[0 1], "*" => ["0", nil], "+" => ["1", nil] }[sym] || [lo, comma ? hi : lo]
-      lo, hi = [lo, hi.to_s].map { |d| d.sub(/\A0+(?=.)/, "") } # canonical; hi "" is no upper bound
-      return nil if hi != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
+      lo, hi = canonical_bounds(lo, hi)
+      return nil unless lo # m > n
 
       !over_one?(lo) && hi != "0"
+    end
+
+    # [lo, hi] without leading zeros (hi "" is no upper bound), or nil when m > n: a JS SyntaxError, left as written
+    def self.canonical_bounds(lo, hi)
+      lo, hi = [lo, hi.to_s].map { |d| d.sub(/\A0+(?=.)/, "") }
+      [lo, hi] unless hi != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
     end
 
     def self.over_one?(digits)
@@ -600,13 +606,12 @@ module Camada
     end
 
     def self.brace_quantifier(match)
-      lo, comma, hi = match.captures.map { |d| d&.sub(/\A0+(?=.)/, "") } # canonical: no leading zeros
-      # m > n is a JS SyntaxError: leave it as written for Onigmo to reject
-      return match[0] if hi.to_s != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
+      lo, hi = canonical_bounds(match[1], match[3])
+      return match[0] unless lo # m > n is a JS SyntaxError: leave it for Onigmo to reject
 
       lo = ONIGMO_REPEAT_MAX.to_s if over_repeat_max?(lo)
       hi = "" if over_repeat_max?(hi) # an upper bound past it never binds a real input
-      "{#{lo}#{comma}#{hi}}"
+      "{#{lo}#{match[2]}#{hi}}"
     end
 
     def self.over_repeat_max?(digits)

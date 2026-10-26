@@ -51,22 +51,13 @@ RSpec.describe "regex limit" do
     end
   end
 
-  %w[refused accepted_match].each do |key|
+  { "refused" => "native", "accepted_match" => "native", "astral_split" => "ruby" }.each do |key, engine|
     vectors[key].each do |row|
-      it "#{row["id"]}: #{row["kind"]} runs natively" do
+      it "#{row["id"]}: #{row["kind"]} answers per engine" do
         rule = vectors["refused_rule"].merge("conds" => [{ "f" => vectors["refused_rule"]["field"], "op" => "matches", "v" => row["pattern"] }])
         row["cases"].each do |c|
-          expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
+          expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"][engine]), c["ua"].inspect
         end
-      end
-    end
-  end
-
-  vectors["astral_split"].each do |row|
-    it "#{row["id"]}: #{row["kind"]} answers per engine" do
-      rule = vectors["refused_rule"].merge("conds" => [{ "f" => vectors["refused_rule"]["field"], "op" => "matches", "v" => row["pattern"] }])
-      row["cases"].each do |c|
-        expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["ruby"]), c["ua"].inspect
       end
     end
   end
