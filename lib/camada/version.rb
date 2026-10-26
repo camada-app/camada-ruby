@@ -6,6 +6,6 @@ module Camada
   # camada-web, camada-mkt) parse this file with /^\s*VERSION = "([^"]+)"/m the way they parse
   # a package.json. Plain X.Y.Z only, and @camada/ruby must stay in the analyst's SDK_NAMES:
   # its sdkId drops anything else.
-  VERSION = "0.2.0"
+  VERSION = "0.2.1"
   SDK_ID = "@camada/ruby/#{VERSION}".freeze
 end

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 - 2026-10-26
+
+- fix: inside a lookbehind, a char whose case fold is several chars (ß, ﬀ, İ and 101 others) now matches only itself under IGNORECASE, as JS `/i` does. Onigmo read such a char there as its fold alone (`(?<=ß)x` matched "ssx" but never "ßx"), and Ruby 3.3.13 and 3.4.12 extended that to ﬀ and İ, so `(?<=ﬀ)x` stopped matching "ﬀx" and `(?<!ﬀ)x` let it through. A rule now behaves the same on every supported Ruby. (camada-all-ozix)
+
 ## 0.2.0 - 2026-10-26
 
 - fix (security): snapshot meta `pathsRegex` entries are now tested like a path `matches` rule condition, and inside the request's regex budget shared with the rule walk. They are case-insensitive, a pattern this SDK refuses never matches, and a path over 2048 chars, an engine failure or a spent budget answers block. Previously they ran outside the budget, and a failure was a miss. `Snapshot#paths_regex` is now a list of predicates. (camada-all-rvuh)
