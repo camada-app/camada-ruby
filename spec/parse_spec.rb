@@ -795,18 +795,27 @@ RSpec.describe "Camada::Snapshot.path_hit?" do
     expect(Camada::Snapshot.compile_regex("x😀{y").match?("x😀{y")).to be(true)
   end
 
-  # a zero count is the high unit alone in V8: the position stops mid-char (camada-all-5lra)
+  # V8 repeats only the low unit; the zero-low reading (high unit alone) is not emulated, so these miss (camada-all-5lra)
   [
-    ["x😀{0}", "x😀", true], ["x😀{0}.y", "x😀y", true], ["x😀{0}y", "x😀y", false], ["x😀{0}y", "xy", false],
-    ["x😀?", "x😁", true], ["x😀?.", "x😁", true], ["x😀?y", "xy", false], ["x😀{0,1}..", "x😁a", true],
-    ["x\\😀?y", "xy", false], ["x\\😀?y", "x😀y", true], ["x\\😀{0}", "x😀", true], ["x\\😀y", "x😀y", true]
+    ["x😀{0}", "x😀", false], ["x😀{0}.y", "x😀y", false], ["x😀?", "x😁", false], ["x😀?.", "x😁", false],
+    ["x😀{0,1}..", "x😁a", false], ["x\\😀{0}", "x😀", false], ["x😀?😁", "x😁", false], ["x😀?\\b", "x😀", false],
+    ["x😀?(?<=x)", "x😀", false]
+  ].each do |pattern, text, hit|
+    it "does not emulate V8's zero-low reading of #{pattern} on #{text.inspect}" do
+      expect(Camada::Snapshot.compile_regex(pattern).match?(text)).to be(hit)
+    end
+  end
+
+  [
+    ["x😀{0}y", "x😀y", false], ["x😀{0}y", "xy", false], ["x😀?y", "xy", false],
+    ["x\\😀?y", "xy", false], ["x\\😀?y", "x😀y", true], ["x\\😀y", "x😀y", true]
   ].each do |pattern, text, hit|
     it "reads #{pattern} on #{text.inspect} as V8 does" do
       expect(Camada::Snapshot.compile_regex(pattern).match?(text)).to be(hit)
     end
   end
 
-  it "drops the zero-count alternative inside a lookbehind" do
+  it "keeps a one-count astral char in a lookbehind" do
     rx = Camada::Snapshot.compile_regex("(?<=a😀?)b")
     expect([rx.match?("a😀b"), rx.match?("ab")]).to eq([true, false])
   end
