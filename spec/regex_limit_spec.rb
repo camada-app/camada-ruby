@@ -25,7 +25,7 @@ RSpec.describe "regex limit" do
   def as_input(i) = i.transform_keys(&:to_sym).transform_values { |v| expand(v) }
 
   it "reads the pinned vectors" do
-    expect(Digest::SHA256.file(vectors_path).hexdigest).to eq("b01e86bd2bead280081f58d31f7f517131d8cafa6144b8c27fe868e3c3959d56")
+    expect(Digest::SHA256.file(vectors_path).hexdigest).to eq("d549b323af4ba9b863a401a474da77baee46711832d1ef4241986bafc0bffc15")
   end
 
   it "has the contract constants" do
@@ -51,18 +51,19 @@ RSpec.describe "regex limit" do
     end
   end
 
-  %w[refused accepted_match].each do |key|
+  { "refused" => "native", "accepted_match" => "native", "astral_split" => "ruby" }.each do |key, engine|
     vectors[key].each do |row|
-      it "#{row["id"]}: #{row["kind"]} runs natively" do
+      it "#{row["id"]}: #{row["kind"]} answers per engine" do
         rule = vectors["refused_rule"].merge("conds" => [{ "f" => vectors["refused_rule"]["field"], "op" => "matches", "v" => row["pattern"] }])
         row["cases"].each do |c|
-          expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"]["native"]), c["ua"].inspect
+          expect(hit?(rule, ip: "8.8.8.8", ua: expand(c["ua"]))).to eq(c["hit"][engine]), c["ua"].inspect
         end
       end
     end
   end
 
   it "has rows to run natively" do
+    expect(vectors["astral_split"]).not_to be_empty
     expect(vectors["refused"]).not_to be_empty
     expect(vectors["accepted_match"]).not_to be_empty
   end
