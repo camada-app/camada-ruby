@@ -368,7 +368,7 @@ RSpec.describe Camada::Snapshot do
       expect(Camada::Snapshot.compile_regex(big)).not_to be_nil
       Process.clock_gettime(Process::CLOCK_MONOTONIC) - t
     end.min
-    expect(best).to be < 0.2
+    expect(best).to be < 1.0 # CI runners take ~0.28 s; the quadratic walk this guards against takes seconds
     rx = ->(p) { Camada::Snapshot.compile_regex(p) }
     expect(rx.call("[é-ü]").match?("ö")).to be(true)
     expect(rx.call("[é-ü]").match?("a")).to be(false)
