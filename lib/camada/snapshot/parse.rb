@@ -151,7 +151,10 @@ module Camada
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
     # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
     # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
-    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo). Onigmo also diverges from JS on a
+    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
+    # A quantifier right after a raw astral char repeats the whole char here but only its low unit in JS,
+    # so js_to_onigmo answers as V8 does: the char alone when the count allows 1, else `(?!)` (camada-all-5lra).
+    # Onigmo also diverges from JS on a
     # repeated capture group whose body can match empty, even with no backreference: `((x?[ab]*)+?[ab]){2}` on 'aa'
     # matches in JS, not here (an accepted gap, camada-all-mx0s). Under IGNORECASE Onigmo also applies
     # multi-char case folds JS /i (one char at a time) does not: `\A(?:ss)\z` matches "ß", `[ß]` and `[a\S]` match "SS", `ff` matches
@@ -331,6 +334,7 @@ module Camada
       !b.nil? && b[1].delete("0").empty?
     end
 
+    JS_QUANT = /\G(?:([?*+])|\{([0-9]+)(?:(,)([0-9]*))?\})\??/ # a JS quantifier with its lazy `?`
     JS_BRACE = /\G\{([0-9]+)(?:(,)([0-9]*))?\}/
     ONIGMO_REPEAT_MAX = 100_000 # Onigmo rejects a repeat number above this ("too big number for repeat range")
     JS_WS = "\\t-\\r\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff" # JS \s (Ruby's is ASCII)
@@ -552,6 +556,15 @@ module Camada
           i += 1 if m && !m[0].include?(",") && pattern[i] == "?"
           next
         end
+        if !in_class && ch.ord >= 0xF0 && (q = pattern.match(JS_QUANT, i + 4)) && !(count = astral_count(q)).nil?
+          if count && lbs.last # the char alone is a literal
+            out << "(?:)" if lit_end == i
+            lit_end = q.end(0)
+          end
+          out << (count ? pattern[i, 4] : "(?!)")
+          i = q.end(0)
+          next
+        end
         # a literal in a lookbehind directly after another gets `(?:)` (never inside a UTF-8 char): Onigmo folds `ss` to ß under /i
         if !in_class && lbs.last && !"()|*+?".include?(ch)
           if ch.ord.between?(0x80, 0xBF)
@@ -565,6 +578,16 @@ module Camada
         i += 1
       end
       out.force_encoding(enc)
+    end
+
+    # V8 repeats only the low unit of an astral char: true when the quantifier allows one, false when not, nil when m > n (left as written)
+    def self.astral_count(match)
+      sym, lo, comma, hi = match.captures
+      lo, hi = { "?" => %w[0 1], "*" => ["0", nil], "+" => ["1", nil] }[sym] || [lo, comma ? hi : lo]
+      lo, hi = [lo, hi.to_s].map { |d| d.sub(/\A0+(?=.)/, "") } # canonical; hi "" is no upper bound
+      return nil if hi != "" && ([lo.length, lo] <=> [hi.length, hi]).positive?
+
+      !over_one?(lo) && hi != "0"
     end
 
     def self.over_one?(digits)
