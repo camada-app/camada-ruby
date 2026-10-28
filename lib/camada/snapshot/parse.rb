@@ -401,11 +401,10 @@ module Camada
       class_start = nil # the out index of an open positive class's `[` inside a lookbehind
       class_alts = [] # the `\S`/`\W`/`\D` and multi-fold chars that class held
       last_named = {} # name -> the index of its last opener
-      look = pattern.match?(/\(\?<?[=!]/n) # a lookaround: Onigmo drops a match of an iota-subscript char before one (camada-all-zn38)
       while i < n
         ch = pattern[i]
-        if look && !in_class && !lbs.last && (w = multi_fold(pattern, i)) && IOTA_SUBSCRIPT.match?(w[0].dup.force_encoding(Encoding::UTF_8))
-          out << "(?-i:#{w[0]})" # outside a lookbehind (the branch below) and a class; JS /i matches it only to itself
+        if !in_class && !lbs.last && (w = multi_fold(pattern, i)) && IOTA_SUBSCRIPT.match?(w[2])
+          out << "(?-i:#{w[0]})" # outside a lookbehind (the branch below) and a class; JS /i matches it only to itself (camada-all-zn38)
           i += w[1]
           next
         end
@@ -634,11 +633,11 @@ module Camada
     # The 63 Greek chars whose fold ends in an iota (ᾀ -> ἀι): Onigmo never matches one before a lookaround under /i.
     IOTA_SUBSCRIPT = /\A[\u1F80-\u1FAF\u1FB2-\u1FB4\u1FB7\u1FBC\u1FC2-\u1FC4\u1FC7\u1FCC\u1FF2-\u1FF4\u1FF7\u1FFC]/
 
-    # [its text, its length] when the char at i (raw UTF-8, `\uXXXX` or an identity escape `\ß`) has a case fold of
+    # [its text, its length, the char] when the char at i (raw UTF-8, `\uXXXX` or an identity escape `\ß`) has a case fold of
     # several chars (ß, İ, ﬀ: 104 of them), else nil. JS /i without `u` matches each of them only to itself.
     def self.multi_fold(pattern, i)
       if pattern[i] == "\\"
-        return (w = multi_fold(pattern, i + 1)) && [w[0], w[1] + 1] if pattern.getbyte(i + 1).to_i >= 0x80
+        return (w = multi_fold(pattern, i + 1)) && [w[0], w[1] + 1, w[2]] if pattern.getbyte(i + 1).to_i >= 0x80
 
         m = pattern.match(/\G\\(?:u(\h{4})|x([89a-fA-F]\h))/n, i) # `\xHH` above 0x7F is the code point (camada-all-w2w4)
         return nil unless m && !(cp = (m[1] || m[2]).hex).between?(0xD800, 0xDFFF)
@@ -653,7 +652,7 @@ module Camada
         len = b < 0xE0 ? 2 : 3
         c = pattern.byteslice(i, len).force_encoding(Encoding::UTF_8)
       end
-      [pattern.byteslice(i, len), len] if c.valid_encoding? && c.downcase(:fold).length > 1
+      [pattern.byteslice(i, len), len, c] if c.valid_encoding? && c.downcase(:fold).length > 1
     end
 
     def self.brace_quantifier(match)
