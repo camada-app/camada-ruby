@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.2.2 - 2026-10-28
 
+- fix: a `\xHH` escape above 0x7F (e.g. `\xdf`) is read as that code point, as JS does. Before, it made the whole pattern fail to compile, so the rule never matched. (camada-all-w2w4)
+- fix: `\b` and `\B` are ASCII word boundaries, as in JS. Onigmo's Unicode-aware `\b` made `x\b` miss "xé" and `é\b` match "é". (camada-all-7xw0)
 - fix: a Greek iota-subscript char (ᾀ and 62 others) now matches only itself under IGNORECASE, as JS `/i` does. Onigmo never matched it before a lookaround (`ᾀ(?=x)` missed "ᾀx"). (camada-all-zn38)
+- fix: the same holds for an iota-subscript char inside a positive `[class]` before a lookahead. (camada-all-rmje)
 
 ## 0.2.1 - 2026-10-26
 
