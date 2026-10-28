@@ -462,7 +462,8 @@ module Camada
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           if kept
             e = (pattern.match(/\G\\\d+/n, i) || pattern.match(JS_ATOM, i))[0] # the whole escape: a lookbehind must not split `\x41`
-            out << e
+            # JS reads \xHH above 0x7F as that code point, Onigmo as a raw byte (camada-all-w2w4)
+            out << (e.match?(/\A\\x[89a-fA-F]\h\z/) ? "\\u00#{e[2..]}" : e)
             i += e.length
             next
           end
@@ -630,11 +631,12 @@ module Camada
       if pattern[i] == "\\"
         return (w = multi_fold(pattern, i + 1)) && [w[0], w[1] + 1] if pattern.getbyte(i + 1).to_i >= 0x80
 
-        m = pattern.match(/\G\\u(\h{4})/n, i)
-        return nil unless m && !(cp = m[1].hex).between?(0xD800, 0xDFFF)
+        m = pattern.match(/\G\\(?:u(\h{4})|x([89a-fA-F]\h))/n, i) # `\xHH` above 0x7F is the code point (camada-all-w2w4)
+        return nil unless m && !(cp = (m[1] || m[2]).hex).between?(0xD800, 0xDFFF)
 
         c = cp.chr(Encoding::UTF_8)
-        len = 6
+        len = m[0].length
+        return [format("\\u%04x", cp), len] if c.downcase(:fold).length > 1 && m[2]
       else
         b = pattern.getbyte(i)
         return nil unless b.between?(0xC2, 0xEF) # a 2- or 3-byte lead: every such char is in the BMP
