@@ -148,6 +148,16 @@ RSpec.describe Camada::Snapshot do
     expect(m.match(input(ip: nil)).rule).to be_nil          # no address: false for every op, negatives included
   end
 
+  it "reads \\b and \\B as ASCII, as JS without the u flag does" do
+    {
+      ["x\\b", "xé"] => true, ["\\bx", "éx"] => true, ["a\\bé", "aé"] => true,
+      ["é\\b", "é"] => false, ["é\\b", "éa"] => true, ["é\\B", "é"] => true,
+      ["[\\b]", "\b"] => true, ["x\\b", "xa"] => false
+    }.each do |(pattern, value), want|
+      expect(Camada::Snapshot.compile_regex(pattern).match?(value)).to be(want), "#{pattern} on #{value}"
+    end
+  end
+
   it "translates the JS regex spellings" do
     m = rules_snapshot([{ "id" => "ver", "action" => "block", "conds" => [{ "f" => "path", "op" => "matches", "v" => "^/api/(?<ver>v\\d+)/" }] }])
     expect(m.match(input(path: "/api/v2/dump")).rule).to eq("ver")
