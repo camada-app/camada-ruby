@@ -756,11 +756,11 @@ RSpec.describe "Camada::Snapshot matches cap" do
     # camada-all-rmje: the same in a positive [class]; it matches that char only, not its folds
     it "matches an iota-subscript char in a class only to itself, as JS does" do
       {
-        "[ᾀ](?=x)" => [%W[ᾀx], %W[ᾈx ἀιx x]],
-        "[ᾀb](?=x)" => [%W[ᾀx Bx], %W[ᾈx]],
-        "[b\\u1F80]+(?!y)" => [%W[bᾀx], %W[ᾈ]],
-        "[a-cῼ\\d]$" => [%W[ῼ 5 B], %W[´]],
-        "(?<=[ᾀ])x" => [%W[ᾀx], %W[ᾈx]]
+        "[ᾀ](?=x)" => [%w[ᾀx], %w[ᾈx ἀιx x]],
+        "[ᾀb](?=x)" => [%w[ᾀx Bx], %w[ᾈx]],
+        "[b\\u1F80]+(?!y)" => [%w[bᾀx], %w[ᾈ]],
+        "[a-cῼ\\d]$" => [%w[ῼ 5 B], %w[´]],
+        "(?<=[ᾀ])x" => [%w[ᾀx], %w[ᾈx]]
       }.each do |pat, (hits, misses)|
         rx = ci.call(pat)
         expect(rx).not_to be_nil, pat
@@ -771,7 +771,7 @@ RSpec.describe "Camada::Snapshot matches cap" do
 
     it "matches each of the 63 iota-subscript chars in a class only to itself" do
       chars = (0x1f80..0x1faf).to_a + [0x1fb2, 0x1fb3, 0x1fb4, 0x1fb7, 0x1fbc, 0x1fc2, 0x1fc3, 0x1fc4, 0x1fc7, 0x1fcc,
-                                         0x1ff2, 0x1ff3, 0x1ff4, 0x1ff7, 0x1ffc]
+                                       0x1ff2, 0x1ff3, 0x1ff4, 0x1ff7, 0x1ffc]
       expect(chars.length).to eq(63)
       chars.each do |cp|
         c = [cp].pack("U")
