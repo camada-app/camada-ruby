@@ -736,6 +736,23 @@ RSpec.describe "Camada::Snapshot matches cap" do
       expect(rx.match?("ssx")).to be(false)
     end
 
+    # camada-all-zn38: Onigmo never matches an iota-subscript char before a lookaround under /i; JS matches it only to itself
+    it "matches an iota-subscript char before a lookaround, as JS does" do
+      {
+        "\u1f80(?=x)" => [%W[\u1f80x], %W[\u1f88x x]],
+        "\u1f88(?!y)" => [%W[\u1f88x], %W[\u1f88y]],
+        "a\u1fb3b(?=x)" => [%W[A\u1fb3bx], %W[a\u1fb3b]],
+        "\\u1F80(?=x)" => [%W[\u1f80x], %W[\u1f88x]],
+        "a\u1f80$" => [%W[A\u1f80], %W[a\u1f88]],
+        "(\u1ffc)+(?=x)" => [%W[\u1ffc\u1ffcx], %W[\u1ffc]]
+      }.each do |pat, (hits, misses)|
+        rx = ci.call(pat)
+        expect(rx).not_to be_nil, pat
+        hits.each { |v| expect(rx.match?(v)).to be(true), "#{pat} #{v}" }
+        misses.each { |v| expect(rx.match?(v)).to be(false), "#{pat} #{v}" }
+      end
+    end
+
     it "does not raise on a non-ASCII value for a literal run" do
       { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
         rx = ci.call(pat)
