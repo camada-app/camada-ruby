@@ -149,9 +149,10 @@ module Camada
 
     # A pattern this runtime rejects never matches, and never throws (fail open). Patterns are
     # authored as JS regexes (the analyst validates them with `new RegExp`), so the JS spellings
-    # Onigmo reads differently are translated first — see js_to_onigmo; \d \w \b are ASCII in
-    # Ruby by default, as JS reads them. An astral char is one code point here and two UTF-16 units
-    # in JS, so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
+    # Onigmo reads differently are translated first — see js_to_onigmo; \d \w are ASCII in
+    # Ruby by default, as JS reads them, and \b \B are emitted as (?a:\b) for the same reason.
+    # An astral char is one code point here and two UTF-16 units in JS,
+    # so `.`, `[^a]` and `\S` count it once (an accepted gap, camada-all-vuvo).
     # A quantifier right after a raw astral char repeats the whole char here but only its low unit in JS,
     # so js_to_onigmo answers as V8 does: the char when the count allows 1, else `(?!)` (camada-all-5lra, see astral_count).
     # Where a lookbehind ends up holding `(?!)`, Onigmo cannot compile it, so compile_regex returns nil and the rule never matches.
@@ -437,6 +438,11 @@ module Camada
           if l == "s" || l == "S"
             out << JS_SPACE[l] # in a class too: Onigmo nests classes, one atom
             pull_end = i + 2 if in_class
+            i += 2
+            next
+          end
+          if !in_class && (l == "b" || l == "B")
+            out << "(?a:\\#{l})" # Onigmo's \b reads é as a word char, JS (no u flag) as ASCII only
             i += 2
             next
           end
