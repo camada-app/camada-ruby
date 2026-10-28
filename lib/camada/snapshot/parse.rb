@@ -373,6 +373,7 @@ module Camada
     # that split (camada-all-ccjo, camada-all-fe1r). A char whose fold is several chars (ß, ﬀ, İ; raw, `\u00df` or `\ß`)
     # becomes `(?-i:ß)` there, pulled out of a positive class like `\S` unless a `-` is beside it (camada-all-ozix):
     # JS /i matches it only to itself, and Onigmo would read it as its fold alone (version-dependent).
+    # One of the 63 iota-subscript chars in a positive class is pulled out the same way in any context (camada-all-rmje).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
@@ -399,18 +400,21 @@ module Camada
       bars = [-1] # per open group, the root first: the index of the last `|` in it or an ancestor
       lbs = [false] # per open group, the root first: inside a lookbehind (camada-all-ccjo)
       lit_end = -1 # the pattern index right after the last literal emitted inside a lookbehind
-      class_start = nil # the out index of an open positive class's `[` inside a lookbehind
+      class_start = nil # the out index of an open positive class's `[`
       class_alts = [] # the `\S`/`\W`/`\D` and multi-fold chars that class held
       last_named = {} # name -> the index of its last opener
       while i < n
         ch = pattern[i]
-        if !in_class && !lbs.last && (w = multi_fold(pattern, i)) && IOTA_SUBSCRIPT.match?(w[2])
+        w = multi_fold(pattern, i)
+        iota = w && IOTA_SUBSCRIPT.match?(w[2])
+        if !in_class && !lbs.last && iota
           out << "(?-i:#{w[0]})" # outside a lookbehind (the branch below) and a class; JS /i matches it only to itself (camada-all-zn38)
           i += w[1]
           next
         end
         # in a lookbehind (positive class too, unless a range end) a multi-fold char becomes `(?-i:c)` (camada-all-ozix)
-        if lbs.last && (!in_class || class_start) && (w = multi_fold(pattern, i)) &&
+        # an iota-subscript char in a positive class is pulled out the same way, in a lookbehind or not (camada-all-rmje)
+        if (lbs.last || (in_class && iota)) && (!in_class || class_start) && w &&
            !(in_class && (pattern[i - 1] == "-" || pattern[i + w[1]] == "-"))
           in_class ? class_alts << "(?-i:#{w[0]})" : out << "(?-i:#{w[0]})"
           i += w[1]
@@ -429,7 +433,7 @@ module Camada
             next
           end
           l = pattern[i + 1]
-          if in_class && class_start && (l == "S" || l == "W" || l == "D")
+          if in_class && class_start && lbs.last && (l == "S" || l == "W" || l == "D")
             class_alts << (l == "S" ? JS_SPACE["S"] : "\\#{l}") # spliced in at the `]`: a positive class holding one gains multi-char folds
             pull_end = i + 2
             i += 2
@@ -499,12 +503,12 @@ module Camada
             else
               out << "]"
             end
-            lit_end = i + 1 if class_start # Onigmo merges a one-char class into the literals beside it
+            lit_end = i + 1 if class_start && lbs.last # Onigmo merges a one-char class into the literals beside it
             class_start = nil
             i += 1
             next
           end
-          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(class_start ? /\G-\\[sSWD]/ : /\G-\\[sS]/, i))
+          if ch == "-" && (pull_end == i || solo_end == i || pattern.match?(class_start && lbs.last ? /\G-\\[sSWD]/ : /\G-\\[sS]/, i))
             if pull_end == i # JS reads the atom after that dash as standalone: a dash right after it is text too
               m = pattern.match(JS_ATOM, i + 1) # nil when the pattern ends on the dash
               solo_end = m ? i + 1 + m[0].length : pattern.length
@@ -561,10 +565,8 @@ module Camada
             i = j + 1
             next
           end
-          if !neg && lbs.last
-            out << "(?:)" if lit_end == i
-            class_start = out.length
-          end
+          out << "(?:)" if !neg && lbs.last && lit_end == i
+          class_start = out.length unless neg
           out << pattern[i...j]
           i = j
           in_class = true
