@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- fix: a Greek iota-subscript char (ᾀ and 62 others) in a pattern with a lookaround now matches only itself under IGNORECASE, as JS `/i` does. Onigmo never matched it before a lookaround (`ᾀ(?=x)` missed "ᾀx"). (camada-all-zn38)
+
 ## 0.2.1 - 2026-10-26
 
 - fix: inside a lookbehind, a char whose case fold is several chars (ß, ﬀ, İ and 101 others) now matches only itself under IGNORECASE, as JS `/i` does. Onigmo read such a char there as its fold alone (`(?<=ß)x` matched "ssx" but never "ßx"), and Ruby 3.3.13 and 3.4.12 extended that to ﬀ and İ, so `(?<=ﬀ)x` stopped matching "ﬀx" and `(?<!ﬀ)x` let it through. A rule now behaves the same on every supported Ruby. (camada-all-ozix)
