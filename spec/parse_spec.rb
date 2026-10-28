@@ -720,6 +720,16 @@ RSpec.describe "Camada::Snapshot matches cap" do
       expect(Camada::Snapshot.js_to_onigmo("(?<=[a-\u00df])x")).to eq("(?<=[a-\u00df])x") # a range end stays
     end
 
+    # camada-all-w2w4: JS reads \xHH above 0x7F as that code point; Onigmo reads a raw byte and the pattern compiled to nil
+    it "reads \\xHH above 0x7F as the code point, as JS does" do
+      { "a\\xdfb" => %W[a\u00dfb ab], "[\\xe9\\xC9]x" => %W[\u00e9x \u00c9x ex], "\\x41\\x7f" => ["A\x7f", "A"] }.each do |pat, (hit, miss)|
+        rx = Camada::Snapshot.compile_regex(pat)
+        expect(rx).not_to be_nil, pat
+        expect(rx.match?(hit)).to be(true), pat
+        expect(rx.match?(miss)).to be(false), pat
+      end
+    end
+
     it "does not raise on a non-ASCII value for a literal run" do
       { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
         rx = ci.call(pat)
