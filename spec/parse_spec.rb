@@ -730,6 +730,12 @@ RSpec.describe "Camada::Snapshot matches cap" do
       end
     end
 
+    it "keeps \\xdf in a lookbehind matching only itself under IGNORECASE" do
+      rx = ci.call("(?<=\\xdf)x")
+      expect(rx.match?("\u00dfx")).to be(true)
+      expect(rx.match?("ssx")).to be(false)
+    end
+
     it "does not raise on a non-ASCII value for a literal run" do
       { "(?<=ass)x" => %w[éassx éASSx], "(?<=/class/)x" => ["\u00e9/CLASS/x"] }.each do |pat, vals|
         rx = ci.call(pat)
