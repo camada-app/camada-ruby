@@ -372,6 +372,7 @@ module Camada
     # that split (camada-all-ccjo, camada-all-fe1r). A char whose fold is several chars (ß, ﬀ, İ; raw, `\u00df` or `\ß`)
     # becomes `(?-i:ß)` there, pulled out of a positive class like `\S` unless a `-` is beside it (camada-all-ozix):
     # JS /i matches it only to itself, and Onigmo would read it as its fold alone (version-dependent).
+    # One of the 63 iota-subscript chars in a positive class is pulled out the same way in any context (camada-all-rmje).
     # In a class `\c` is a control char only before a letter, digit or `_` (ClassControlLetter); before
     # anything else (`[\c*]`) it is a literal `\` then `c` (camada-all-mqcb).
     # A `{m,n}` bound above Onigmo's 100000 is clamped: m to 100000, and an n above it drops (`{m,}`,
