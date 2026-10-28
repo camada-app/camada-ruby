@@ -468,7 +468,7 @@ module Camada
             i += 1
             next
           end
-          kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) || (l == "B" && !in_class) ||
+          kept = !l.match?(/[A-Za-z]/) || pattern.match?(JS_ESCAPE, i + 1) ||
                  (l == "k" && named)
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           if kept

@@ -152,10 +152,11 @@ RSpec.describe Camada::Snapshot do
     {
       ["x\\b", "xé"] => true, ["\\bx", "éx"] => true, ["a\\bé", "aé"] => true,
       ["é\\b", "é"] => false, ["é\\b", "éa"] => true, ["é\\B", "é"] => true,
-      ["[\\b]", "\b"] => true, ["x\\b", "xa"] => false
+      ["[\\b]", "\b"] => true, ["x\\b", "xa"] => false, ["(?<=\\b)x", "éx"] => true
     }.each do |(pattern, value), want|
       expect(Camada::Snapshot.compile_regex(pattern).match?(value)).to be(want), "#{pattern} on #{value}"
     end
+    expect(Camada::Snapshot.compile_regex("x\\b", Regexp::IGNORECASE).match?("Xé")).to be(true)
   end
 
   it "translates the JS regex spellings" do
