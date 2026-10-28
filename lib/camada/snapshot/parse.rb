@@ -462,7 +462,8 @@ module Camada
           l = "\\\\c" if l == "c" # JS reads `\c` before a non-letter as text
           if kept
             e = (pattern.match(/\G\\\d+/n, i) || pattern.match(JS_ATOM, i))[0] # the whole escape: a lookbehind must not split `\x41`
-            out << e
+            # JS reads \xHH above 0x7F as that code point, Onigmo as a raw byte (camada-all-w2w4)
+            out << (e.match?(/\A\\x[89a-f]\h\z/i) ? "\\u00#{e[2..]}" : e)
             i += e.length
             next
           end
