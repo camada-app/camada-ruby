@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- fix: a Greek iota-subscript char (ᾀ and 62 others) in a pattern with a lookaround now matches only itself under IGNORECASE, as JS `/i` does. Onigmo never matched it before a lookaround (`ᾀ(?=x)` missed "ᾀx"). (camada-all-zn38)
+- fix: a Greek iota-subscript char (ᾀ and 62 others) now matches only itself under IGNORECASE, as JS `/i` does. Onigmo never matched it before a lookaround (`ᾀ(?=x)` missed "ᾀx"). (camada-all-zn38)
 
 ## 0.2.1 - 2026-10-26
 
