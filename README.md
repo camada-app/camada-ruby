@@ -4,13 +4,21 @@ camada for Ruby: enforces the tenant snapshot inline (your ordered custom rules,
 block, challenge), serves a first-party proof-of-work challenge page and beacon, records the
 outcomes your handlers know (`Camada.track`), and ships wire events in batches off the request
 path. One gem with a Rack middleware that any Rack app mounts (Sinatra, Hanami, plain Rack) and
-a Railtie that mounts it for Rails — the `sentry-ruby` model. Fails open by design: a camada
+a Railtie that mounts it for Rails (the `sentry-ruby` model). Fails open by design: a camada
 outage or bug never 5xxes your app.
 
-Not yet on RubyGems — install it from a sibling checkout: `gem "camada", path: "../camada-ruby"`
-in your Gemfile (as [`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) does); publishing is one
-decision with the npm packages (SDK-G01). Ruby 3.1 or newer, no runtime dependencies (stdlib
-only: `net/http`, `openssl`, `digest`, `json`, `securerandom`, `zlib`, `stringio`).
+Install from RubyGems with `bundle add camada`. Ruby 3.1 or newer, with no runtime dependencies
+(stdlib only: `net/http`, `openssl`, `digest`, `json`, `securerandom`, `zlib`, `stringio`). For
+local SDK work, use `gem "camada", path: "../camada-ruby"` in your Gemfile, as
+[`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) does.
+
+## Documentation
+
+- [Ruby SDK guide](https://www.camada.app/docs/ruby): options, Rack middleware, Rails Railtie, and proxy rules.
+- [Rails and Rack quickstart](https://www.camada.app/docs/quickstart/rails): install the gem and mount `Camada::Rack`.
+- [In-app bot detection](https://www.camada.app/bot-detection): how camada stops credential stuffing, fake signups, and scrapers.
+- [Test your bot signals](https://www.camada.app/tools/bot-test): live browser, HTTP, and TLS signal inspector.
+- [Docs](https://www.camada.app/docs) and [Pricing](https://www.camada.app/pricing): full reference and plan limits.
 
 ## Quickstart
 
@@ -66,7 +74,7 @@ use Camada::Rack, engine
    thread at the cadence your tenant config sets (`poll_seconds`), with ETag/304 and gzip on the
    wire. `CAMADA_SERVERLESS=1` switches to a per-request staleness check with no poll thread. Every
    poll and event batch carries `x-camada-sdk: @camada/ruby/<version>`, and polls ask for
-   snapshot v5 (`x-camada-snapshot: 5`) — the container that carries your ordered custom rules.
+   snapshot v5 (`x-camada-snapshot: 5`), the container that carries your ordered custom rules.
 2. Resolves the client from the socket peer (`REMOTE_ADDR`), combined with `X-Forwarded-For`
    only under your tenant's trusted-proxy config (or `CAMADA_TRUSTED_PROXY` locally). A forwarded
    header on its own is never the ip: any caller can set it. **Never `request.ip`**:
@@ -171,7 +179,7 @@ valid `_cch`, then `nil`. A non-page (non-HTML) request also gets `nil` and is s
 outcomes. Puma hands the env to Rack as binary strings; the middleware reads them as UTF-8 with
 invalid bytes replaced (U+FFFD) before matching and shipping, so a stray high byte in a header
 neither escapes a rule nor costs the batch it rides in. The Rack env carries no wire header order (`hord` is the env's order), so this tap ships no header-order signal; camada resolves ASN and country itself. Enforcement
-at this position covers ip, path, user-agent and header conditions — ASN, country and TLS entries
+at this position covers ip, path, user-agent and header conditions: ASN, country and TLS entries
 fail open in-app. `matches` patterns are JS regexes read by Ruby's Onigmo: named groups are
 native, `[^]` and `\cX` are translated, `^`/`$` become `\A`/`\z` (Ruby's are line anchors,
 JS's are not), `\d`/`\w`/`\b` are ASCII as in JS; a spelling Ruby still rejects never matches
@@ -183,14 +191,14 @@ match differently here than at the edge: that is an Onigmo engine difference.
 
 ## Deploying it
 
-- Every worker process polls its own snapshot (about 5 MB resident, read a word at a time — never
+- Every worker process polls its own snapshot (about 5 MB resident, read a word at a time, never
   expanded into Ruby Integers) and flushes its own batches; the tenant's `poll_seconds` keeps the
   cadence honest across a fleet.
 - Threads do not survive a fork. Ruby has no fork hook, so the SDK compares `Process.pid` on every
   call and starts over in a forked worker: new locks, an empty queue, its poll and flush threads
   restarted. Puma cluster mode with `preload_app!`, Unicorn and Passenger need nothing added.
 - Pending events drain at interpreter exit within half a second (`at_exit`). No signal handlers
-  are installed — an app owns its own shutdown — so a worker killed by SIGKILL, or by SIGTERM
+  are installed (an app owns its own shutdown), so a worker killed by SIGKILL, or by SIGTERM
   without a handler, may drop its last batch.
 - Serverless: `CAMADA_SERVERLESS=1`. A cold invocation fails open and catches up on the next one.
 - The middleware writes lower-case header names; it appends `set-cookie` as an Array under Rack 3
@@ -213,7 +221,7 @@ bundle install && bundle exec rubocop && bundle exec rspec
 No type checker: the gem has no runtime dependencies and a Sorbet or Steep setup would add a
 toolchain (and RBS signatures for every stdlib seam) for a 2.5k-line port whose behaviour is
 pinned by the golden fixtures instead; it is deferred, not refused. A Rails example app is
-deferred the same way — the Railtie ships in the gem, the example repo is Sinatra.
+deferred the same way: the Railtie ships in the gem, and the example repo is Sinatra.
 
 The suite reads the golden snapshot fixtures from the `camada-core` sibling checkout and pins the
 vendored beacon to `camada-browser/dist/auto.global.js` (`npm run build` there first, then
