@@ -21,7 +21,7 @@ module Camada
   BODY_MAX = 4 * 1024               # the verify form is ~120 bytes; anything larger is not ours
   # Row keys only the SDK can attest (TLS/network facts, outcome, session, track()). A beacon body is the
   # visitor's, so these never ride a sig:1 row; the analyst joins them from the beacon's request row.
-  REQUEST_ROW_KEYS = %w[tlsx ja4 asn cc sid ns st dur rt blk rl wrn chs ch et uid].freeze
+  REQUEST_ROW_KEYS = %w[tlsx ja4 asn cc sid ns st dur rt blk rl wrn chs ch et uid tk bf upf].freeze
 
   SESSION_COOKIE = "_sfp"           # same cookie as the edge collector: sid/ns comparable across taps
   SESSION_MAX_AGE = 2_592_000       # 30 days

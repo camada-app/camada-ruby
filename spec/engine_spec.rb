@@ -222,6 +222,77 @@ RSpec.describe Camada::Engine do
     end
   end
 
+  describe "token hashing" do
+    let(:token) { "fake-token-0001-not-a-real-credential" }
+    let(:authorization) { [["authorization", "Bearer #{token}"]] }
+
+    it "omits tk from finish and block rows by default" do
+      h = site
+      expect(h.call("GET", "/api", headers: authorization).status).to eq(200)
+      expect(h.call("GET", "/api", headers: authorization, peer: FakeAnalyst::BLOCKED_IP).status).to eq(403)
+      rows = h.events
+      expect(rows.map { |row| row["st"] }).to eq([200, 403])
+      rows.each { |row| expect(row).not_to have_key("tk") }
+    end
+
+    it "ships tk on finish, block, challenge and verify rows, but not on track rows" do
+      a.container = "v4"
+      h = site(token_hash: true)
+      expect(h.call("GET", "/api", headers: authorization).status).to eq(200)
+      Camada.track(h.seen.last, "signup")
+      expect(h.call("GET", "/api", headers: authorization, peer: FakeAnalyst::BLOCKED_IP).status).to eq(403)
+      challenge = h.call("GET", "/api", headers: authorization + Host::HTML, peer: FakeAnalyst::CHALLENGED_IP)
+      expect(challenge.status).to eq(403)
+      nonce = nonce_of(challenge.body)
+      form = "nonce=#{nonce}&solution=#{solve(nonce)}&to=%2Fapi"
+      expect(h.call("POST", "/__camada/challenge", headers: authorization, body: form, peer: FakeAnalyst::CHALLENGED_IP).status).to eq(302)
+      rows = h.events
+      tk = OpenSSL::HMAC.hexdigest("SHA256", "tok-test", "tok:#{token}")[0, 32]
+      expect(rows.map { |row| row.values_at("st", "blk", "ch") }).to eq([[200, nil, nil], [nil, nil, nil], [403, "ip4", nil], [403, "challenge", nil], [200, nil, 1]])
+      expect(rows.values_at(0, 2, 3, 4).map { |row| row["tk"] }).to eq([tk, tk, tk, tk])
+      expect(rows[1]).to include("et" => "signup")
+      expect(rows[1]).not_to have_key("tk")
+    end
+
+    it "enables hashing and selects the extra header from the environment" do
+      h = site({ "CAMADA_TOKEN_HASH" => "1", "CAMADA_TOKEN_HEADER" => "X-Api-Key" })
+      extra = "fake-api-key-0007"
+      h.call("GET", "/api", headers: authorization + [["x-api-key", extra]])
+      expect(h.events.first["tk"]).to eq(Camada::Redact.hash_token(extra, "tok-test"))
+    end
+
+    it "warns once without exposing invalid or forbidden options or falling back to the environment" do
+      lines = []
+      logger = Camada::Guarded.logger
+      last_log = Camada::Guarded.instance_variable_get(:@last_log)
+      Camada::Guarded.logger = ->(line) { lines << line }
+      Camada::Guarded.instance_variable_set(:@last_log, nil)
+      env = { "CAMADA_TOKEN_HEADER" => "X-Api-Key" }
+      ["X-\u212Aey with spaces", "Set-Cookie"].each do |header|
+        h = site(env, token_hash: true, token_header: header)
+        h.call("GET", "/api", headers: [%w[x-api-key fake-api-key-0007]])
+        expect(h.events.last).not_to have_key("tk")
+      end
+      expect(lines).to contain_exactly(a_string_including("invalid or forbidden token header name"))
+      expect(lines.first).not_to include("with spaces", "Set-Cookie", "X-Api-Key")
+    ensure
+      Camada::Guarded.logger = logger
+      Camada::Guarded.instance_variable_set(:@last_log, last_log)
+    end
+
+    it "ships finish and block rows without tk when the hasher raises" do
+      h = site(token_hash: true)
+      failing_hasher = ->(_value) { raise "hashing unavailable" }
+      h.engine.instance_variable_set(:@token_hasher, failing_hasher)
+      expect(h.call("GET", "/api", headers: authorization).status).to eq(200)
+      expect(h.call("GET", "/api", headers: authorization, peer: FakeAnalyst::BLOCKED_IP).status).to eq(403)
+      expect(h.seen.length).to eq(1)
+      rows = h.events
+      expect(rows.map { |row| row.values_at("st", "blk") }).to eq([[200, nil], [403, "ip4"]])
+      rows.each { |row| expect(row).not_to have_key("tk") }
+    end
+  end
+
   describe "beacon" do
     it "serves the script and batches fp as a sig row with the resolved ip" do
       hops1
@@ -241,8 +312,8 @@ RSpec.describe Camada::Engine do
     end
 
     it "strips SDK-attested keys a visitor puts in the beacon body" do
-      h = site
-      forged = %w[tlsx ja4 asn cc sid ns st dur rt blk rl wrn chs ch et uid].to_h { |k| [k, "forged"] }
+      h = site(token_hash: true)
+      forged = %w[tlsx ja4 asn cc sid ns st dur rt blk rl wrn chs ch et uid tk bf upf].to_h { |k| [k, "forged"] }
       body = JSON.generate(forged.merge("rid" => "r-1", "tz" => "UTC"))
       expect(h.call("POST", "/_cam/fp", body: body).status).to eq(204)
       expect(h.events.length).to eq(1)

@@ -7,6 +7,23 @@ module Camada
   # as JSON delivers them. A trusted-proxy config mirrors the server-validated tenant config
   # (edge-analyst src/tenant-config.js): {mode: none} | {mode: hops, hops: N} | {mode: cidrs, cidrs: [...]} | {mode: vercel}.
   module Config
+    def self.token_hash_enabled?(option, env_value)
+      option.nil? ? env_value == "1" : option == true
+    end
+
+    # Returns [header name, invalid setting?] so the caller can warn without logging the input.
+    def self.resolve_token_header(option, env_value)
+      selected = option.nil? || option == "" ? env_value : option
+      return [nil, false] if selected.nil? || selected == ""
+      return [nil, true] unless selected.is_a?(String)
+
+      name = selected.b.downcase(:ascii)
+      return [nil, true] unless /\A[a-z0-9-]{1,64}\z/.match?(name)
+      return [nil, true] if %w[authorization cookie set-cookie].include?(name)
+
+      [name, false]
+    end
+
     # CAMADA_KEY is `<ingest_token>.<snap_token>` (printed by reconcile instructions and seed).
     def self.parse_key(key)
       return nil if key.nil? || key.empty?

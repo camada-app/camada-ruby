@@ -11,6 +11,32 @@ RSpec.describe Camada::Config do
       [nil, "", "nodot", ".snap", "tok."].each { |bad| expect(described_class.parse_key(bad)).to be_nil, bad.inspect }
     end
   end
+
+  describe ".token_hash_enabled?" do
+    it "gives the option precedence and accepts only 1 from the environment" do
+      expect(described_class.token_hash_enabled?(false, "1")).to be(false)
+      expect(described_class.token_hash_enabled?(true, nil)).to be(true)
+      expect(described_class.token_hash_enabled?(nil, "1")).to be(true)
+      [nil, "true", " 1"].each do |value|
+        expect(described_class.token_hash_enabled?(nil, value)).to be(false)
+      end
+    end
+  end
+
+  describe ".resolve_token_header" do
+    it "uses the first non-empty setting and lowercases ASCII" do
+      expect(described_class.resolve_token_header("X-Extra", "X-Env")).to eq(["x-extra", false])
+      expect(described_class.resolve_token_header("", "X-Env")).to eq(["x-env", false])
+      expect(described_class.resolve_token_header(nil, nil)).to eq([nil, false])
+    end
+
+    it "reports invalid or forbidden settings without falling back to the environment" do
+      ["X Extra", "Authorization", "Cookie", "Set-Cookie", "X-\u212Aey", "X-Key\n", "x" * 65].each do |value|
+        expect(described_class.resolve_token_header(value, "X-Env")).to eq([nil, true]), value.inspect
+      end
+      expect(described_class.resolve_token_header(nil, "X-\u212Aey")).to eq([nil, true])
+    end
+  end
 end
 
 RSpec.describe Camada::Env do

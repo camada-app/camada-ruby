@@ -90,7 +90,8 @@ module Camada
     attr_reader :env, :snap, :queue, :kit, :script_path, :fp_path, :challenge_path, :challenge_on
 
     def initialize(env: ENV, transport: nil, refresh_s: nil, script_path: SCRIPT_PATH, fp_path: FP_PATH,
-                   challenge: true, challenge_path: CHALLENGE_PATH, snapshot_version: DEFAULT_SNAPSHOT_VERSION)
+                   challenge: true, challenge_path: CHALLENGE_PATH, snapshot_version: DEFAULT_SNAPSHOT_VERSION,
+                   token_hash: nil, token_header: nil)
       # env: where CAMADA_* are read from (ENV, or a Hash); transport: threaded into the snapshot
       # client and event queue (tests); refresh_s: pinned poll cadence; challenge: enforce
       # `challenge` verdicts with the first-party page (CAMADA_CHALLENGE=0 also off).
@@ -104,6 +105,13 @@ module Camada
       @queue = nil
       @kit = nil
       return if @env.nil? || env[KILL_SWITCH_ENV] == "1" # unconfigured or killed at boot: no threads, no exit hooks, truly silent
+
+      @token_header, invalid_header = Config.resolve_token_header(token_header, env["CAMADA_TOKEN_HEADER"])
+      Guarded.log_rate_limited("invalid or forbidden token header name") if invalid_header
+      if Config.token_hash_enabled?(token_hash, env["CAMADA_TOKEN_HASH"])
+        ingest_token = @env.ingest_token
+        @token_hasher = ->(credential) { Redact.hash_token(credential, ingest_token) }
+      end
 
       @snap = Snapshot::Client.new(
         @env.snapshot_url, @env.snap_token, refresh_s: refresh_s, mode: @env.serverless ? :lazy : :timer,
@@ -304,7 +312,11 @@ module Camada
     def event(req, rid, sid, new_session, ip)
       info = Events::RequestInfo.new(method: req.method, host: req.host, path: req.path, query: req.query, headers: req.headers,
                                      ip: ip, http_version: req.http_version)
-      Events.build_wire_event(info, tap: TAP, rid: rid, sid: sid, new_session: new_session)
+      Events.build_wire_event(
+        info,
+        tap: TAP, rid: rid, sid: sid, new_session: new_session,
+        token_header: @token_header, token_hasher: @token_hasher
+      )
     end
 
     # ---- beacon ----

@@ -7,6 +7,7 @@ RSpec.describe "sdk conformance (C6)" do
   ip = Fixtures.read_json("ip/resolve.json")
   referer = Fixtures.read_json("redact/referer.json")
   query = Fixtures.read_json("redact/query.json")
+  token = Fixtures.read_json("redact/token.json")
 
   it "reads v3 fixtures with cases" do
     expect([ip["version"], referer["version"], query["version"]]).to eq([3, 3, 3])
@@ -48,6 +49,33 @@ RSpec.describe "sdk conformance (C6)" do
         expect(ev["q"]).to eq(c["q"])
         wire = JSON.generate(ev)
         (c["absent"] || []).each { |secret| expect(wire).not_to include(secret) }
+      end
+    end
+  end
+
+  describe "token hash" do
+    it "reads all 22 cases in the v1 fixture" do
+      expect(token["version"]).to eq(1)
+      expect(token["cases"].length).to eq(22)
+    end
+
+    token["cases"].each do |c|
+      it c["id"] do
+        headers = c["headers"]
+        token_header, = Camada::Config.resolve_token_header(c["tokenHeader"], nil)
+        extra = Camada::Redact.credential(headers[token_header], false)
+        auth = Camada::Redact.credential(headers["authorization"], true)
+        expect(extra || auth).to eq(c["credential"])
+
+        info = Camada::Events::RequestInfo.new(method: "GET", host: "x.test", path: "/api/me", headers: headers.to_a)
+        hasher = ->(credential) { Camada::Redact.hash_token(credential, c["key"]) }
+        ev = Camada::Events.build_wire_event(info, tap: "sdk-ruby", rid: "r", token_header: token_header, token_hasher: hasher)
+        if c["tk"].nil?
+          expect(ev).not_to have_key("tk")
+        else
+          expect(ev["tk"]).to eq(c["tk"])
+          expect(JSON.generate(ev)).not_to include(c["credential"])
+        end
       end
     end
   end

@@ -18,6 +18,7 @@ module Camada
     HEX_RE = /\A[a-fA-F0-9]{32,}\z/n
     B64_RE = %r{\A[A-Za-z0-9+/_-]{40,}={0,2}\z}n
     ESC_RE = /%([0-9a-fA-F]{2})/n
+    SCHEME_RE = /\A[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}\z/
 
     REDACT_ALLOWLIST = %w[plan role locale ab_variant].freeze # additions only, never narrowing
 
@@ -120,6 +121,21 @@ module Camada
     # can never double as anything else, truncated to 32 hex chars. The raw identifier never leaves.
     def self.hash_user_id(user_id, ingest_token)
       OpenSSL::HMAC.hexdigest("SHA256", ingest_token, "uid:#{user_id}")[0, 32]
+    end
+
+    def self.credential(value, scheme_split)
+      return nil if value.nil?
+
+      value = value.b.sub(/\A[ \t]+/, "").sub(/[ \t]+\z/, "")
+      if scheme_split
+        scheme, space, rest = value.partition(" ")
+        value = rest.sub(/\A[ \t]+/, "") if !space.empty? && SCHEME_RE.match?(scheme)
+      end
+      value if value.bytesize >= 8 && value.each_byte.all? { |byte| byte.between?(0x20, 0x7e) }
+    end
+
+    def self.hash_token(credential, ingest_token)
+      OpenSSL::HMAC.hexdigest("SHA256", ingest_token.encode(Encoding::UTF_8), "tok:#{credential}")[0, 32]
     end
   end
 end
