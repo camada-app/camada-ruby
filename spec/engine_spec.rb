@@ -282,8 +282,7 @@ RSpec.describe Camada::Engine do
 
     it "ships finish and block rows without tk when the hasher raises" do
       h = site(token_hash: true)
-      failing_hasher = ->(_value) { raise "hashing unavailable" }
-      h.engine.instance_variable_set(:@token_hasher, failing_hasher)
+      allow(Camada::Redact).to receive(:hash_token).and_raise("hashing unavailable")
       expect(h.call("GET", "/api", headers: authorization).status).to eq(200)
       expect(h.call("GET", "/api", headers: authorization, peer: FakeAnalyst::BLOCKED_IP).status).to eq(403)
       expect(h.seen.length).to eq(1)

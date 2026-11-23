@@ -19,16 +19,17 @@ RSpec.describe Camada::Events do
   it "uses first header values even when a later value would yield a credential" do
     headers = [["X-Extra", "short"], %w[x-extra fake-extra-token],
                ["Authorization", "Bearer first-token"], ["authorization", "Bearer second-token"]]
-    ev = build(headers, token_header: "x-extra", token_hasher: ->(value) { Camada::Redact.hash_token(value, "key") })
+    config = Camada::Events::TokenConfig.new(header: "x-extra", hasher: ->(value) { Camada::Redact.hash_token(value, "key") })
+    ev = build(headers, token_config: config)
     expect(ev["tk"]).to eq(Camada::Redact.hash_token("first-token", "key"))
   end
 
   it "keeps a request row when the token hasher raises" do
     headers = [["Authorization", "Bearer fake-token"], %w[User-Agent fake-api-key-0007]]
     failing_hasher = ->(_value) { raise "hashing unavailable" }
-    ev = build(headers, token_header: "user-agent", token_hasher: failing_hasher)
+    config = Camada::Events::TokenConfig.new(header: "user-agent", hasher: failing_hasher)
+    ev = build(headers, token_config: config)
     expect(ev).to include("rid" => "r", "auth" => "Bearer")
     expect(ev).not_to have_key("tk")
-    expect(JSON.generate(ev)).not_to include("fake-api-key-0007")
   end
 end

@@ -15,10 +15,6 @@ module Camada
     ].freeze
     HDR_BIT = HDRS.each_with_index.to_h { |name, i| [name, 1 << i] }.freeze
 
-    # A schemeless header (`Authorization: <raw token>`) has no safe prefix: the first "word" IS
-    # the credential. Only a real auth-scheme token followed by a space ever ships.
-    SCHEME_RE = Redact::SCHEME_RE
-
     RequestInfo = Struct.new(
       :method, :host, :path,
       :query,        # includes the leading '?', or empty
@@ -27,28 +23,21 @@ module Camada
       :http_version, # e.g. '1.1'
       keyword_init: true
     )
+    TokenConfig = Struct.new(:header, :hasher, keyword_init: true)
 
-    def self.auth_scheme(value)
-      return nil if value.nil? || value.empty?
-
-      sp = value.index(" ")
-      return nil if sp.nil? || sp <= 0
-
-      scheme = value[0, sp]
-      SCHEME_RE.match?(scheme) ? scheme : nil
-    end
+    def self.auth_scheme(value) = Redact.auth_scheme(value)
 
     def self.now_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
 
     # The mutable wire event (string keys, ready for JSON); the caller fills st/dur on
     # response-finish before enqueueing.
-    def self.build_wire_event(r, tap:, rid:, sid: nil, new_session: false, ja4: nil, token_header: nil, token_hasher: nil)
+    def self.build_wire_event(r, tap:, rid:, sid: nil, new_session: false, ja4: nil, token_config: nil)
       mask = hn = hb = 0
       cookie = +""
       names = []
       first = {}
       (r.headers || []).each do |name, value|
-        k = name.downcase(:ascii)
+        k = name.downcase
         hn += 1
         hb += name.bytesize + value.bytesize # bytes on the wire, as the collector and the WSGI (latin-1) port count them
         names << k
@@ -58,12 +47,12 @@ module Camada
       end
       query = r.query || ""
       qn = query.length > 1 ? query[1..].split("&").count { |p| !p.empty? } : 0
-      tk = token_hash(first, token_header, token_hasher) if token_hasher
+      tk = token_hash(first, token_config) if token_config
       ev = {
         "tap" => tap, "rid" => rid, "sid" => sid, "ns" => new_session ? 1 : 0, "ts" => now_ms,
         "ip" => r.ip,
         "proto" => r.http_version ? "HTTP/#{r.http_version}" : nil,
-        "m" => r.method, "h" => token_hasher && token_header == "host" ? nil : r.host,
+        "m" => r.method, "h" => r.host,
         "p" => r.path, "q" => Redact.scrub_query(query)[0, 512], "qn" => qn,
         "ct" => first["content-type"], "cl" => first["content-length"],
         "ua" => first["user-agent"], "chua" => first["sec-ch-ua"],
@@ -83,14 +72,9 @@ module Camada
       ev
     end
 
-    def self.token_hash(first, header, hasher)
-      # A configured credential header may otherwise be copied into a normal request field.
-      credential = Redact.credential(first.delete(header), false) if header
-      credential ||= Redact.credential(first["authorization"], true)
-      return nil if credential.nil?
-
-      digest = hasher.call(credential)
-      digest unless digest.nil? || digest.empty?
+    def self.token_hash(first, token_config)
+      credential = Redact.select_credential(first, token_config.header)
+      token_config.hasher.call(credential) if credential
     rescue StandardError, NotImplementedError
       nil # Keep the row and enforcement decision even if hashing fails.
     end

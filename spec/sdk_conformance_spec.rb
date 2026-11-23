@@ -63,13 +63,12 @@ RSpec.describe "sdk conformance (C6)" do
       it c["id"] do
         headers = c["headers"]
         token_header, = Camada::Config.resolve_token_header(c["tokenHeader"], nil)
-        extra = Camada::Redact.credential(headers[token_header], false)
-        auth = Camada::Redact.credential(headers["authorization"], true)
-        expect(extra || auth).to eq(c["credential"])
+        expect(Camada::Redact.select_credential(headers, token_header)).to eq(c["credential"])
 
         info = Camada::Events::RequestInfo.new(method: "GET", host: "x.test", path: "/api/me", headers: headers.to_a)
         hasher = ->(credential) { Camada::Redact.hash_token(credential, c["key"]) }
-        ev = Camada::Events.build_wire_event(info, tap: "sdk-ruby", rid: "r", token_header: token_header, token_hasher: hasher)
+        config = Camada::Events::TokenConfig.new(header: token_header, hasher: hasher)
+        ev = Camada::Events.build_wire_event(info, tap: "sdk-ruby", rid: "r", token_config: config)
         if c["tk"].nil?
           expect(ev).not_to have_key("tk")
         else

@@ -106,11 +106,11 @@ module Camada
       @kit = nil
       return if @env.nil? || env[KILL_SWITCH_ENV] == "1" # unconfigured or killed at boot: no threads, no exit hooks, truly silent
 
-      @token_header, invalid_header = Config.resolve_token_header(token_header, env["CAMADA_TOKEN_HEADER"])
+      header, invalid_header = Config.resolve_token_header(token_header, env["CAMADA_TOKEN_HEADER"])
       Guarded.log_rate_limited("invalid or forbidden token header name") if invalid_header
       if Config.token_hash_enabled?(token_hash, env["CAMADA_TOKEN_HASH"])
         ingest_token = @env.ingest_token
-        @token_hasher = ->(credential) { Redact.hash_token(credential, ingest_token) }
+        @token_config = Events::TokenConfig.new(header: header, hasher: ->(credential) { Redact.hash_token(credential, ingest_token) })
       end
 
       @snap = Snapshot::Client.new(
@@ -312,11 +312,7 @@ module Camada
     def event(req, rid, sid, new_session, ip)
       info = Events::RequestInfo.new(method: req.method, host: req.host, path: req.path, query: req.query, headers: req.headers,
                                      ip: ip, http_version: req.http_version)
-      Events.build_wire_event(
-        info,
-        tap: TAP, rid: rid, sid: sid, new_session: new_session,
-        token_header: @token_header, token_hasher: @token_hasher
-      )
+      Events.build_wire_event(info, tap: TAP, rid: rid, sid: sid, new_session: new_session, token_config: @token_config)
     end
 
     # ---- beacon ----
