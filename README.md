@@ -132,11 +132,26 @@ use Camada::Rack, engine
 | `challenge_path` | `/__camada/challenge` | where the page posts its solution |
 | `snapshot_version` | `5` | 4 drops your custom rules; 3 the allow/challenge sides too |
 | `script_path` / `fp_path` | `/_cam/b.js` / `/_cam/fp` | the beacon endpoints; keep them in one directory |
+| `token_hash` | `nil` | set to `true` to enable credential hashing or `false` to disable it |
+| `token_header` | `nil` | optional extra credential header to try before `Authorization` |
 
 Env: `CAMADA_KEY` (or `CAMADA_TOKEN` + `CAMADA_SNAPSHOT_TOKEN`), `CAMADA_INGEST_URL`,
 `CAMADA_SNAPSHOT_URL`, `CAMADA_TRUSTED_PROXY` (`none | vercel | hops:N | cidrs:a,b`),
 `CAMADA_SERVERLESS=1`, `CAMADA_CHALLENGE=0`, and the kill switch `CAMADA_DISABLED=1` (checked per
 request; set at boot, no threads start at all).
+
+### Credential hashing
+
+Set `token_hash: true` or `CAMADA_TOKEN_HASH=1` to enable credential hashing. The environment
+flag must be exactly `1` and applies only when `token_hash` is unset. Use `token_header` or
+`CAMADA_TOKEN_HEADER` to name an extra header, such as `X-Api-Key`. A non-empty option takes
+precedence over the environment. Camada reads these settings when it creates the engine and
+tries the extra header before `Authorization` on each request.
+
+Request events carry `tk` as the first 32 lowercase hex characters of an HMAC-SHA256 keyed by
+your ingest token. The credential value stays in the app. Camada omits `tk` when hashing is off,
+no header yields a usable credential, or hashing fails. Enable this only for random tokens or API keys.
+Keep it off for human passwords sent over Basic authentication.
 
 ## The first-party beacon
 

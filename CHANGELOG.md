@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- feat: add opt-in credential hashing for request events and strip forged `tk`, `bf` and `upf` from beacon rows. (camada-all-29aa)
+
 ## 0.2.2 - 2026-10-28
 
 - fix: a `\xHH` escape above 0x7F (e.g. `\xdf`) is read as that code point, as JS does. Before, it made the whole pattern fail to compile, so the rule never matched. (camada-all-w2w4)

@@ -18,6 +18,7 @@ module Camada
     HEX_RE = /\A[a-fA-F0-9]{32,}\z/n
     B64_RE = %r{\A[A-Za-z0-9+/_-]{40,}={0,2}\z}n
     ESC_RE = /%([0-9a-fA-F]{2})/n
+    SCHEME_RE = /\A[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}\z/
 
     REDACT_ALLOWLIST = %w[plan role locale ab_variant].freeze # additions only, never narrowing
 
@@ -119,7 +120,41 @@ module Camada
     # Stable per-tenant pseudonym: HMAC-SHA256 keyed by the ingest token, labelled so the hash
     # can never double as anything else, truncated to 32 hex chars. The raw identifier never leaves.
     def self.hash_user_id(user_id, ingest_token)
-      OpenSSL::HMAC.hexdigest("SHA256", ingest_token, "uid:#{user_id}")[0, 32]
+      hash_labeled("uid", user_id, ingest_token)
     end
+
+    # Only a valid auth-scheme token followed by a space is safe to ship.
+    def self.auth_scheme(value)
+      return nil if value.nil? || value.empty?
+
+      sp = value.index(" ")
+      return nil if sp.nil? || sp <= 0
+
+      scheme = value[0, sp]
+      SCHEME_RE.match?(scheme) ? scheme : nil
+    end
+
+    def self.credential(value, scheme_split)
+      return nil if value.nil?
+
+      value = value.b.gsub(/\A[ \t]+|[ \t]+\z/, "")
+      scheme = auth_scheme(value) if scheme_split
+      value = value[(scheme.length + 1)..].sub(/\A[ \t]+/, "") if scheme
+      value if /\A[\x20-\x7e]{8,}\z/n.match?(value)
+    end
+
+    def self.select_credential(first, token_header)
+      extra = credential(first[token_header], false) if token_header
+      extra || credential(first["authorization"], true)
+    end
+
+    def self.hash_token(credential, ingest_token)
+      hash_labeled("tok", credential, ingest_token.encode(Encoding::UTF_8))
+    end
+
+    def self.hash_labeled(label, value, key)
+      OpenSSL::HMAC.hexdigest("SHA256", key, "#{label}:#{value}")[0, 32]
+    end
+    private_class_method :hash_labeled
   end
 end

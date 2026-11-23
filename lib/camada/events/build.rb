@@ -15,10 +15,6 @@ module Camada
     ].freeze
     HDR_BIT = HDRS.each_with_index.to_h { |name, i| [name, 1 << i] }.freeze
 
-    # A schemeless header (`Authorization: <raw token>`) has no safe prefix: the first "word" IS
-    # the credential. Only a real auth-scheme token followed by a space ever ships.
-    SCHEME_RE = /\A[A-Za-z0-9!#$%&'*+.^_`|~-]{1,16}\z/
-
     RequestInfo = Struct.new(
       :method, :host, :path,
       :query,        # includes the leading '?', or empty
@@ -27,22 +23,15 @@ module Camada
       :http_version, # e.g. '1.1'
       keyword_init: true
     )
+    TokenConfig = Struct.new(:header, :hasher, keyword_init: true)
 
-    def self.auth_scheme(value)
-      return nil if value.nil? || value.empty?
-
-      sp = value.index(" ")
-      return nil if sp.nil? || sp <= 0
-
-      scheme = value[0, sp]
-      SCHEME_RE.match?(scheme) ? scheme : nil
-    end
+    def self.auth_scheme(value) = Redact.auth_scheme(value)
 
     def self.now_ms = Process.clock_gettime(Process::CLOCK_REALTIME, :millisecond)
 
     # The mutable wire event (string keys, ready for JSON); the caller fills st/dur on
     # response-finish before enqueueing.
-    def self.build_wire_event(r, tap:, rid:, sid: nil, new_session: false, ja4: nil)
+    def self.build_wire_event(r, tap:, rid:, sid: nil, new_session: false, ja4: nil, token_config: nil)
       mask = hn = hb = 0
       cookie = +""
       names = []
@@ -58,11 +47,13 @@ module Camada
       end
       query = r.query || ""
       qn = query.length > 1 ? query[1..].split("&").count { |p| !p.empty? } : 0
+      tk = token_hash(first, token_config) if token_config
       ev = {
         "tap" => tap, "rid" => rid, "sid" => sid, "ns" => new_session ? 1 : 0, "ts" => now_ms,
         "ip" => r.ip,
         "proto" => r.http_version ? "HTTP/#{r.http_version}" : nil,
-        "m" => r.method, "h" => r.host, "p" => r.path, "q" => Redact.scrub_query(query)[0, 512], "qn" => qn,
+        "m" => r.method, "h" => r.host,
+        "p" => r.path, "q" => Redact.scrub_query(query)[0, 512], "qn" => qn,
         "ct" => first["content-type"], "cl" => first["content-length"],
         "ua" => first["user-agent"], "chua" => first["sec-ch-ua"],
         "chmob" => first["sec-ch-ua-mobile"], "chplat" => first["sec-ch-ua-platform"],
@@ -75,9 +66,18 @@ module Camada
         "hord" => names.join(",")[0, 2048] # header order as this host reports it (the env's order under Rack)
       }
       ev["ja4"] = ja4 if ja4
+      ev["tk"] = tk if tk
       ev["st"] = nil
       ev["dur"] = nil # 'dur': the collector wire already claims 'lat' for latitude
       ev
     end
+
+    def self.token_hash(first, token_config)
+      credential = Redact.select_credential(first, token_config.header)
+      token_config.hasher.call(credential) if credential
+    rescue StandardError, NotImplementedError
+      nil # Keep the row and enforcement decision even if hashing fails.
+    end
+    private_class_method :token_hash
   end
 end
