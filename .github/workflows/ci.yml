@@ -10,21 +10,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with: { path: camada-ruby }
-      # The suite reads golden fixtures from camada-core and pins camada-browser to the vendored release tag.
+      # Golden snapshot fixtures and the beacon pinned to its vendored release tag.
       - uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/camada-core
           path: camada-core
       - id: beacon
         run: |
-          v=$(sed -n 's/^[[:space:]]*BEACON_VERSION = "\([^"]*\)"$/\1/p' camada-ruby/lib/camada/beacon_js.rb)
-          [ -n "$v" ] || { echo "::error::no vendored beacon version in camada-ruby/lib/camada/beacon_js.rb"; exit 1; }
+          f=camada-ruby/lib/camada/beacon_js.rb
+          v=$(sed -n 's/^[[:space:]]*BEACON_VERSION = "\([^"]*\)"$/\1/p' "$f")
+          [ -n "$v" ] || { echo "::error::no vendored beacon version in $f"; exit 1; }
           echo "ref=v$v" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/camada-browser
-          ref: ${{ steps.beacon.outputs.ref }}
           path: camada-browser
+          ref: ${{ steps.beacon.outputs.ref }}
       - uses: actions/setup-node@v7
         with: { node-version: 22.x }
       - run: npm install && npm run build
