@@ -287,6 +287,25 @@ RSpec.describe Camada::Engine do
       Camada::Guarded.instance_variable_set(:@last_warn, last_warn)
     end
 
+    it "warns about a missing key as config and leaves the error budget alone" do
+      lines = []
+      logger = Camada::Guarded.logger
+      Camada::Guarded.logger = ->(l) { lines << l }
+      Camada::Guarded.instance_variable_set(:@last_log, nil)
+      Camada::Guarded.instance_variable_set(:@last_warn, nil)
+      Camada.create_engine(env: {})
+      Camada::Guarded.log_rate_limited(RuntimeError.new("sdk bug"))
+      expected = [
+        "[camada] config warning: CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set — camada is inactive",
+        "[camada] suppressed error (SDK fails open): RuntimeError: sdk bug"
+      ]
+      expect(lines).to eq(expected)
+    ensure
+      Camada::Guarded.logger = logger
+      Camada::Guarded.instance_variable_set(:@last_log, nil)
+      Camada::Guarded.instance_variable_set(:@last_warn, nil)
+    end
+
     it "ships finish and block rows without tk when the hasher raises" do
       h = site(token_hash: true)
       allow(Camada::Redact).to receive(:hash_token).and_raise("hashing unavailable")
