@@ -37,7 +37,7 @@ module Camada
       names = []
       first = {}
       (r.headers || []).each do |name, value|
-        k = name.downcase
+        k = name.downcase(:ascii)
         hn += 1
         hb += name.bytesize + value.bytesize # bytes on the wire, as the collector and the WSGI (latin-1) port count them
         names << k
