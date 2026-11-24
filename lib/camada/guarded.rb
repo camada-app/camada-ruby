@@ -5,6 +5,8 @@ module Camada
   # the SDK catches, falls back, and reports through log_rate_limited: at most one line a minute.
   module Guarded
     @last_log = nil # monotonic seconds of the last line; nil until the first one
+    @last_warn = nil
+    @warn_lock = Mutex.new
     @logger = nil
 
     class << self
@@ -18,13 +20,28 @@ module Camada
         return if @last_log && now - @last_log < 60
 
         @last_log = now
-        line = "[camada] suppressed error (SDK fails open): #{describe(err)}"
-        (@logger || ->(s) { warn(s) }).call(line)
+        write_line("[camada] suppressed error (SDK fails open): #{describe(err)}")
+      rescue StandardError
+        nil # even logging must not raise
+      end
+
+      def warn_rate_limited(msg)
+        @warn_lock.synchronize do
+          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          return if @last_warn && now - @last_warn < 60
+
+          @last_warn = now
+        end
+        write_line("[camada] config warning: #{msg}")
       rescue StandardError
         nil # even logging must not raise
       end
 
       private
+
+      def write_line(line)
+        (@logger || ->(s) { warn(s) }).call(line)
+      end
 
       # Exceptions print as "Class: message" on one line — never a backtrace, and never the
       # "(ClassName)" spelling an uncaught Ruby exception uses, so a crash grep stays quiet.
