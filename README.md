@@ -245,9 +245,13 @@ pinned by the golden fixtures instead; it is deferred, not refused. A Rails exam
 deferred the same way: the Railtie ships in the gem, and the example repo is Sinatra.
 
 The suite reads the golden snapshot fixtures from the `camada-core` sibling checkout and pins the
-vendored beacon to `camada-browser/dist/auto.global.js` (check out the release tag, run
-`npm run build` there, then `ruby scripts/sync_beacon.rb`). Both fail by name when the checkout is
-missing rather than skipping (`CAMADA_FIXTURES_DIR`, `CAMADA_BROWSER_DIST` override the paths).
+vendored beacon to `camada-browser/dist/auto.global.js` (check out the release tag, run `npm run
+build` there, then `ruby scripts/sync_beacon.rb`). Both fail by name when the checkout is missing
+rather than skipping (`CAMADA_FIXTURES_DIR`, `CAMADA_BROWSER_DIST` override the paths). CI checks
+out `camada-core` at the commit pinned by `ref:` in `.github/workflows/ci.yml`, so a fixture
+change on camada-core main cannot turn this CI red; local runs use the sibling checkout as it is.
+To take new fixtures, push them to camada-core main first, then set `ref:` to that commit's full
+SHA in the same commit as the SDK change.
 
 [`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) is the hand-test bench (Sinatra under Puma on
 :3004), and `node scripts/e2e-sdk-ruby.mjs` in `camada/edge-analyst` drives it against a seeded
