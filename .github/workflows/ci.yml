@@ -11,12 +11,12 @@ jobs:
       - uses: actions/checkout@v7
         with: { path: camada-ruby }
       # Golden snapshot fixtures pinned to a camada-core commit (see README for how to bump it).
-      # Beacon pinned to its vendored release tag.
       - uses: actions/checkout@v7
         with:
           repository: ${{ github.repository_owner }}/camada-core
           ref: 08649b21b56804cdb1abbce52b456d3d11e047a8
           path: camada-core
+      # Beacon pinned to its vendored release tag.
       - id: beacon
         run: |
           f=camada-ruby/lib/camada/beacon_js.rb
