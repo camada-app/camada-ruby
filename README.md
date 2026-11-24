@@ -249,6 +249,12 @@ vendored beacon to `camada-browser/dist/auto.global.js` (check out the release t
 `npm run build` there, then `ruby scripts/sync_beacon.rb`). Both fail by name when the checkout is
 missing rather than skipping (`CAMADA_FIXTURES_DIR`, `CAMADA_BROWSER_DIST` override the paths).
 
+CI checks out the `camada-core` commit pinned by `ref:` in `.github/workflows/ci.yml`, so fixture
+changes on `camada-core` main won't affect CI. Local runs still pick up changes in the sibling
+checkout, which usually follows `main`. When this SDK needs new or changed fixtures, push the
+`camada-core` commit with those fixtures to `main` first, then set `ref:` to its full SHA in
+the same commit as the SDK changes.
+
 [`camada-ruby-example`](https://github.com/camada-app/camada-ruby-example) is the hand-test bench (Sinatra under Puma on
 :3004), and `node scripts/e2e-sdk-ruby.mjs` in `camada/edge-analyst` drives it against a seeded
 local analyst over real HTTP, cold first request included.
