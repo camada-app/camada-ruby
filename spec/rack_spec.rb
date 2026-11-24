@@ -30,6 +30,11 @@ RSpec.describe Camada::Rack do
     expect([bin.path, bin.host].map(&:encoding).uniq).to eq([Encoding::UTF_8])
   end
 
+  it "lowercases only ASCII in request header names" do
+    req = described_class.req_from_env({ "HTTP_X_API_\u212AEY" => "value" })
+    expect(req.headers).to eq([%W[x-api-\u212Aey value]])
+  end
+
   it "replaces a challenge page's CSP in place, keeping Rack::Headers" do
     headers = Rack::Headers.new
     headers["content-type"] = "text/html; charset=utf-8"

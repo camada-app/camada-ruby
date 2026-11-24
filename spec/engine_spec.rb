@@ -265,19 +265,26 @@ RSpec.describe Camada::Engine do
       lines = []
       logger = Camada::Guarded.logger
       last_log = Camada::Guarded.instance_variable_get(:@last_log)
+      last_warn = Camada::Guarded.instance_variable_get(:@last_warn)
       Camada::Guarded.logger = ->(line) { lines << line }
       Camada::Guarded.instance_variable_set(:@last_log, nil)
+      Camada::Guarded.instance_variable_set(:@last_warn, nil)
       env = { "CAMADA_TOKEN_HEADER" => "X-Api-Key" }
       ["X-\u212Aey with spaces", "Set-Cookie"].each do |header|
         h = site(env, token_hash: true, token_header: header)
         h.call("GET", "/api", headers: [%w[x-api-key fake-api-key-0007]])
         expect(h.events.last).not_to have_key("tk")
       end
-      expect(lines).to contain_exactly(a_string_including("invalid or forbidden token header name"))
-      expect(lines.first).not_to include("with spaces", "Set-Cookie", "X-Api-Key")
+      Camada::Guarded.log_rate_limited(RuntimeError.new("sdk bug"))
+      expected = [
+        "[camada] config warning: invalid or forbidden token header name",
+        "[camada] suppressed error (SDK fails open): RuntimeError: sdk bug"
+      ]
+      expect(lines).to eq(expected)
     ensure
       Camada::Guarded.logger = logger
       Camada::Guarded.instance_variable_set(:@last_log, last_log)
+      Camada::Guarded.instance_variable_set(:@last_warn, last_warn)
     end
 
     it "ships finish and block rows without tk when the hasher raises" do

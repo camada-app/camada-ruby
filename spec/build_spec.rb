@@ -24,6 +24,18 @@ RSpec.describe Camada::Events do
     expect(ev["tk"]).to eq(Camada::Redact.hash_token("first-token", "key"))
   end
 
+  it "lowercases only ASCII in token header names" do
+    config = Camada::Events::TokenConfig.new(header: "x-api-key", hasher: ->(value) { Camada::Redact.hash_token(value, "key") })
+    value = "fake-token-0001"
+    ev = build([["X-Api-\u212Aey", value]], token_config: config)
+    expect(ev).not_to have_key("tk")
+    expect(ev["hord"]).to eq("x-api-\u212Aey")
+
+    ev = build([["X-Api-Key", value]], token_config: config)
+    expect(ev["tk"]).to eq(Camada::Redact.hash_token(value, "key"))
+    expect(ev["hord"]).to eq("x-api-key")
+  end
+
   it "keeps a request row when the token hasher raises" do
     headers = [["Authorization", "Bearer fake-token"], %w[User-Agent fake-api-key-0007]]
     failing_hasher = ->(_value) { raise "hashing unavailable" }
