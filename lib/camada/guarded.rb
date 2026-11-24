@@ -6,7 +6,6 @@ module Camada
   module Guarded
     @last_log = nil # monotonic seconds of the last line; nil until the first one
     @last_warn = nil
-    @warn_lock = Mutex.new
     @logger = nil
 
     class << self
@@ -26,12 +25,10 @@ module Camada
       end
 
       def warn_rate_limited(msg)
-        @warn_lock.synchronize do
-          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-          return if @last_warn && now - @last_warn < 60
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        return if @last_warn && now - @last_warn < 60
 
-          @last_warn = now
-        end
+        @last_warn = now
         write_line("[camada] config warning: #{msg}")
       rescue StandardError
         nil # even logging must not raise

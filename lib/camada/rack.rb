@@ -21,9 +21,9 @@ module Camada
       headers = []
       env.each do |k, v|
         if k.start_with?("HTTP_")
-          headers << [k[5..].downcase.tr("_", "-"), utf8(v)]
+          headers << [k[5..].downcase(:ascii).tr("_", "-"), utf8(v)]
         elsif (k == "CONTENT_TYPE" || k == "CONTENT_LENGTH") && v && !v.to_s.empty?
-          headers << [k.downcase.tr("_", "-"), utf8(v)]
+          headers << [k.downcase(:ascii).tr("_", "-"), utf8(v)]
         end
       end
       query = utf8(env["QUERY_STRING"])
