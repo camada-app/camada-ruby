@@ -388,7 +388,7 @@ module Camada
 
   def self.create_engine(**opts)
     e = Engine.new(**opts)
-    Guarded.log_rate_limited("CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set — camada is inactive") if e.env.nil?
+    Guarded.warn_rate_limited("CAMADA_KEY (or CAMADA_TOKEN + CAMADA_SNAPSHOT_TOKEN) not set — camada is inactive") if e.env.nil?
     e
   end
 end
